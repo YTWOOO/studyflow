@@ -1,6 +1,14 @@
-import { Store } from './store.js?v=5';
+import { Store } from './store.js?v=7';
 
 'use strict';
+/* ============================================================
+   VERSION — bump this (and the ?v= query strings in index.html,
+   app.js's import of store.js, and store.js's import of
+   firebase-config.js) every time you ship an update, so the site
+   itself tells you which version is actually loaded.
+   ============================================================ */
+const APP_VERSION = 'v7';
+
 /* ============================================================
    CONSTANTS
    ============================================================ */
@@ -406,6 +414,8 @@ function renderNav(){
   $('#topbar-title').textContent = cur? cur.label : 'StudyFlow';
   $('#streak-pill').textContent = `🔥 ${computeStreak()} dia${computeStreak()!==1?'s':''}`;
   $('#theme-label').textContent = State.config.theme==='light'?'Tema claro':State.config.theme==='dark'?'Tema escuro':'Tema automático';
+  const verEl = $('#app-version');
+  if(verEl) verEl.textContent = `StudyFlow ${APP_VERSION}`;
 }
 
 /* ============================================================
@@ -878,12 +888,26 @@ function viewConfig(){
     <button class="btn primary sm" style="margin-top:8px" onclick="App.actions.runImport()">Importar</button>
   </div>
   <div class="card" style="margin-bottom:14px">
+    <h4>Firebase</h4>
+    <p class="faint">${Store.backend.mode==='firebase'
+      ? '✅ Conectado — seus dados são salvos no Firebase e ficam disponíveis em qualquer dispositivo onde você abrir o StudyFlow.'
+      : '⚠️ Não conectado agora — seus dados estão sendo salvos apenas neste navegador (armazenamento local).'}</p>
+    ${Store.lastError ? `<div class="card" style="background:var(--paper-sunken); margin-top:8px; margin-bottom:0">
+        <p class="faint" style="font-family:monospace; font-size:11.5px; word-break:break-word; margin:0">${esc(Store.lastError.message || String(Store.lastError))}</p>
+      </div>` : ''}
+    <button class="btn sm" style="margin-top:10px" onclick="App.actions.retryFirebase()">🔄 Tentar conectar de novo</button>
+  </div>
+  <div class="card" style="margin-bottom:14px">
     <h4>Seus dados</h4>
-    <p class="faint">${Store.backend.mode==='firebase' ? 'Seus dados são salvos no Firebase e ficam disponíveis em qualquer dispositivo onde você abrir o StudyFlow.' : 'Seus dados estão salvos neste navegador (armazenamento local) e continuam disponíveis da próxima vez que você abrir o StudyFlow neste dispositivo. Configure o Firebase em js/firebase-config.js para sincronizar entre dispositivos — veja o README.'}</p>
     <div class="row wrap" style="margin-top:10px">
       <button class="btn sm" onclick="App.actions.exportData()">⬇️ Exportar backup (.json)</button>
       <button class="btn sm danger" onclick="App.actions.clearAllData()">Apagar todos os dados</button>
     </div>
+  </div>
+  <div class="card" style="margin-bottom:14px">
+    <h4>Sobre</h4>
+    <p class="faint">Versão instalada: <strong>${APP_VERSION}</strong></p>
+    <p class="faint" style="margin-top:4px">Se você acabou de atualizar os arquivos e essa versão não mudou, seu navegador (ou o GitHub Pages) ainda está te mostrando uma cópia antiga em cache — force um recarregamento completo (Ctrl+Shift+R, ou Cmd+Shift+R no Mac).</p>
   </div>
   <p class="faint">StudyFlow — organização e evolução pessoal dos seus estudos.</p>`;
 }
@@ -891,6 +915,18 @@ function viewConfig(){
 /* ============================================================
    ROUTER
    ============================================================ */
+function firebaseErrorBanner(){
+  if(!Store.lastError) return '';
+  const msg = Store.lastError.message || String(Store.lastError);
+  return `<div class="banner" style="border-color:var(--danger); background:var(--danger-soft)">
+    <span class="x">🔥</span>
+    <div style="flex:1">
+      <strong>Firebase não conectou — usando armazenamento local neste dispositivo.</strong>
+      <p class="faint" style="margin-top:4px; word-break:break-word; font-family:monospace; font-size:11.5px">${esc(msg)}</p>
+      <p class="faint" style="margin-top:4px">Veja Configurações → Firebase para detalhes.</p>
+    </div>
+  </div>`;
+}
 function render(){
   renderNav();
   const map = {
@@ -899,7 +935,7 @@ function render(){
     semestre:viewSemestre, config:viewConfig,
   };
   const fn = map[State.route] || viewHoje;
-  $('#app').innerHTML = fn();
+  $('#app').innerHTML = firebaseErrorBanner() + fn();
 }
 
 
@@ -968,6 +1004,17 @@ const actions = {
     State.config.theme = order[(i+1)%3]; applyTheme(); saveConfig(); render();
   },
   setTheme(t){ State.config.theme=t; applyTheme(); saveConfig(); render(); },
+  async retryFirebase(){
+    toastMsg('Tentando conectar ao Firebase...');
+    const mode = await Store.init();
+    if(mode === 'firebase'){
+      await loadAll();
+      toastMsg('Conectado ao Firebase!');
+    } else {
+      toastMsg('Ainda não foi possível conectar — veja o erro abaixo.');
+    }
+    render();
+  },
   selectSubject(id){ State.selSubjectId=id; render(); },
   toggleExpand(id){ State.mapExpanded[id]=!State.mapExpanded[id]; render(); },
   setRevTab(t){ State.revTab=t; render(); },

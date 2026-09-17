@@ -8,10 +8,17 @@
 // O resto do app (js/app.js) não sabe qual dos dois está em uso: ele só chama
 // Store.getAll(colecao), Store.save(colecao, id, dados) e Store.remove(colecao, id).
 
-import { firebaseConfig } from './firebase-config.js?v=5';
+import { firebaseConfig } from './firebase-config.js?v=7';
 
 const FIREBASE_SDK_VERSION = '10.13.2';
 const isConfigured = !!(firebaseConfig && firebaseConfig.apiKey && !String(firebaseConfig.apiKey).startsWith('YOUR_'));
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
 
 const LocalBackend = {
   mode: 'local',
@@ -41,19 +48,32 @@ async function buildFirebaseBackend() {
 
 export const Store = {
   backend: null,
+  lastError: null,
   async init() {
     if (isConfigured) {
       try {
-        this.backend = await buildFirebaseBackend();
+        // Never let a blocked/slow gstatic.com request (ad/script blockers,
+        // flaky network) freeze the whole app forever — give up after 6s
+        // and fall back to local storage so the page always loads.
+        this.backend = await withTimeout(
+          buildFirebaseBackend(), 6000,
+          'Tempo esgotado conectando ao Firebase (SDK de gstatic.com). Pode ser um bloqueador de scripts (ex: Brave Shields, uBlock) ou falta de conexão.'
+        );
+        this.lastError = null;
         return this.backend.mode;
       } catch (e) {
+        this.lastError = e;
         console.error('Não foi possível conectar ao Firebase — usando armazenamento local neste dispositivo.', e);
       }
     }
     this.backend = LocalBackend;
     return this.backend.mode;
   },
-  getAll(c) { return this.backend.getAll(c).catch(() => []); },
+  getAll(c) {
+    return withTimeout(this.backend.getAll(c), 8000, `Tempo esgotado lendo "${c}" do backend atual.`)
+      .then(r => { if (this.backend.mode === 'firebase') this.lastError = null; return r; })
+      .catch(e => { console.error('getAll failed, returning empty:', c, e); this.lastError = e; return []; });
+  },
   async save(c, id, data) { try { await this.backend.save(c, id, data); } catch (e) { console.error('save failed', c, id, e); } },
   async remove(c, id) { try { await this.backend.remove(c, id); } catch (e) { console.error('remove failed', c, id, e); } },
 };
