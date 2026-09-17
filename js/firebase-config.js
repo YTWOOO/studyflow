@@ -13,11 +13,10 @@
 // então você pode usar o site mesmo antes de configurar o Firebase.
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyD7cmoA2OnhT7-Vm9IkwIJnulVnI78sSWs",
-  authDomain: "studyflow-46e55.firebaseapp.com",
-  projectId: "studyflow-46e55",
-  storageBucket: "studyflow-46e55.firebasestorage.app",
-  messagingSenderId: "353307442658",
-  appId: "1:353307442658:web:a7d7261318bf1592decdbb",
-  measurementId: "G-540720DPW3"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID",
 };

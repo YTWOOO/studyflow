@@ -1,4 +1,4 @@
-import { Store } from './store.js';
+import { Store } from './store.js?v=3';
 
 'use strict';
 /* ============================================================
@@ -1466,9 +1466,20 @@ const App = {actions, render};
 window.App = App;
 
 (async function boot(){
-  await Store.init();
-  await loadAll();
-  await seedIfEmpty();
-  applyTheme();
-  render();
+  try{
+    await Store.init();
+    await loadAll();
+    await seedIfEmpty();
+    applyTheme();
+    render();
+  }catch(err){
+    console.error('StudyFlow não conseguiu iniciar:', err);
+    const el = document.getElementById('app');
+    if(el) el.innerHTML = `<div class="empty card"><div class="big">⚠️</div>
+      <p><strong>Algo deu errado ao carregar o StudyFlow.</strong></p>
+      <p class="faint" style="word-break:break-word">${esc(err && (err.stack||err.message) || String(err))}</p>
+      <button class="btn" onclick="location.reload()">Recarregar</button></div>`;
+  }
 })();
+window.addEventListener('error', e=>{ console.error('Erro não tratado:', e.error||e.message); });
+window.addEventListener('unhandledrejection', e=>{ console.error('Promessa rejeitada:', e.reason); });

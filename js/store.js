@@ -8,7 +8,7 @@
 // O resto do app (js/app.js) não sabe qual dos dois está em uso: ele só chama
 // Store.getAll(colecao), Store.save(colecao, id, dados) e Store.remove(colecao, id).
 
-import { firebaseConfig } from './firebase-config.js';
+import { firebaseConfig } from './firebase-config.js?v=3';
 
 const FIREBASE_SDK_VERSION = '10.13.2';
 const isConfigured = !!(firebaseConfig && firebaseConfig.apiKey && !String(firebaseConfig.apiKey).startsWith('YOUR_'));
