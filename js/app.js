@@ -1,4 +1,4 @@
-import { Store } from './store.js?v=7';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=8';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store } from './store.js?v=7';
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v7';
+const APP_VERSION = 'v8';
 
 /* ============================================================
    CONSTANTS
@@ -103,7 +103,7 @@ const State = {
   subjects:[], topics:[], sessions:[], exams:[], goals:[], journal:[], semesters:[],
   config:{activeSemesterId:null, streak:{count:0,lastDate:null}, badges:[], theme:'auto', planning:{}},
   selSubjectId:null, mapExpanded:{}, calMonth:null, calSel:null, calTab:'mes', metasTab:'semanal', revTab:'revisar',
-  diarioDate:null,
+  diarioDate:null, showFirebaseForm:false,
 };
 
 async function loadAll(){
@@ -895,7 +895,27 @@ function viewConfig(){
     ${Store.lastError ? `<div class="card" style="background:var(--paper-sunken); margin-top:8px; margin-bottom:0">
         <p class="faint" style="font-family:monospace; font-size:11.5px; word-break:break-word; margin:0">${esc(Store.lastError.message || String(Store.lastError))}</p>
       </div>` : ''}
-    <button class="btn sm" style="margin-top:10px" onclick="App.actions.retryFirebase()">🔄 Tentar conectar de novo</button>
+    <div class="row wrap" style="margin-top:10px">
+      <button class="btn sm" onclick="App.actions.retryFirebase()">🔄 Tentar conectar de novo</button>
+      <button class="btn sm" onclick="App.actions.toggleFirebaseForm()">${State.showFirebaseForm?'Ocultar configuração':'⚙️ Configurar Firebase'}</button>
+    </div>
+    ${State.showFirebaseForm ? (()=>{ const cfg = getActiveFirebaseConfig() || {}; const savedHere = !!getStoredFirebaseConfig();
+      return `<div class="card" style="background:var(--paper-sunken); margin-top:12px">
+        <p class="faint">Isso fica salvo só no armazenamento local <strong>deste navegador</strong> — nunca vai para o código nem para o GitHub. Pegue esses valores em Configurações do projeto → Geral → Seus apps, no console do Firebase.</p>
+        <label class="field">apiKey<input type="password" id="fb-apiKey" value="${esc(cfg.apiKey&&!String(cfg.apiKey).startsWith('YOUR_')?cfg.apiKey:'')}"></label>
+        <label class="field">authDomain<input type="text" id="fb-authDomain" value="${esc(cfg.authDomain||'')}"></label>
+        <label class="field">projectId<input type="text" id="fb-projectId" value="${esc(cfg.projectId||'')}"></label>
+        <label class="field">storageBucket<input type="text" id="fb-storageBucket" value="${esc(cfg.storageBucket||'')}"></label>
+        <div class="field-row">
+          <label class="field">messagingSenderId<input type="text" id="fb-messagingSenderId" value="${esc(cfg.messagingSenderId||'')}"></label>
+          <label class="field">appId<input type="text" id="fb-appId" value="${esc(cfg.appId||'')}"></label>
+        </div>
+        <label class="field">measurementId (opcional)<input type="text" id="fb-measurementId" value="${esc(cfg.measurementId||'')}"></label>
+        <div class="row wrap" style="margin-top:6px">
+          <button class="btn primary sm" onclick="App.actions.saveFirebaseConfigForm()">Salvar e conectar</button>
+          ${savedHere?`<button class="btn sm danger" onclick="App.actions.clearFirebaseConfigForm()">Remover deste dispositivo</button>`:''}
+        </div>
+      </div>`; })() : ''}
   </div>
   <div class="card" style="margin-bottom:14px">
     <h4>Seus dados</h4>
@@ -1004,6 +1024,30 @@ const actions = {
     State.config.theme = order[(i+1)%3]; applyTheme(); saveConfig(); render();
   },
   setTheme(t){ State.config.theme=t; applyTheme(); saveConfig(); render(); },
+  toggleFirebaseForm(){ State.showFirebaseForm = !State.showFirebaseForm; render(); },
+  async saveFirebaseConfigForm(){
+    const apiKey = $('#fb-apiKey').value.trim();
+    const projectId = $('#fb-projectId').value.trim();
+    if(!apiKey || !projectId){ toastMsg('Preencha ao menos apiKey e projectId.'); return; }
+    const cfg = {
+      apiKey,
+      authDomain: $('#fb-authDomain').value.trim() || `${projectId}.firebaseapp.com`,
+      projectId,
+      storageBucket: $('#fb-storageBucket').value.trim() || `${projectId}.appspot.com`,
+      messagingSenderId: $('#fb-messagingSenderId').value.trim(),
+      appId: $('#fb-appId').value.trim(),
+      measurementId: $('#fb-measurementId').value.trim() || undefined,
+    };
+    if(!setStoredFirebaseConfig(cfg)){ toastMsg('Não foi possível salvar (armazenamento local indisponível).'); return; }
+    toastMsg('Configuração salva neste dispositivo. Conectando...');
+    await this.retryFirebase();
+  },
+  clearFirebaseConfigForm(){
+    if(!confirm('Remover a configuração do Firebase salva neste dispositivo? O app volta a usar armazenamento local.')) return;
+    clearStoredFirebaseConfig();
+    toastMsg('Configuração removida deste dispositivo.');
+    this.retryFirebase();
+  },
   async retryFirebase(){
     toastMsg('Tentando conectar ao Firebase...');
     const mode = await Store.init();

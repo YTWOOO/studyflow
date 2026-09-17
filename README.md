@@ -13,7 +13,7 @@ studyflow/
 ├── js/
 │   ├── app.js            # toda a lógica do app: estado, telas, ações
 │   ├── store.js          # camada de armazenamento (Firebase ou local)
-│   └── firebase-config.js  # suas credenciais do Firebase (você preenche)
+│   └── firebase-config.js  # valor padrão opcional (deixe com os placeholders)
 └── README.md
 ```
 
@@ -46,13 +46,21 @@ Para usar o Cloud Firestore de verdade (dados sincronizados entre dispositivos):
 
 1. Crie um projeto gratuito em [console.firebase.google.com](https://console.firebase.google.com).
 2. No menu **Build → Firestore Database**, clique em "Criar banco de dados"
-   (modo produção ou teste, tanto faz para começar).
+   (modo produção ou teste, tanto faz para começar) e publique as regras de
+   segurança (veja abaixo).
 3. Em **Configurações do projeto → Geral → Seus apps**, crie um app da Web
-   (ícone `</>`) e copie o objeto `firebaseConfig` que aparece.
-4. Cole esses valores em `js/firebase-config.js`, substituindo os placeholders
-   `"YOUR_..."`.
-5. Recarregue o site — ele detecta a configuração automaticamente e passa a
-   usar o Firestore.
+   (ícone `</>`) e copie os valores do objeto `firebaseConfig` que aparece.
+4. **No próprio site**, abra **Configurações → Firebase → ⚙️ Configurar Firebase**
+   e cole esses valores lá. Eles ficam salvos só no `localStorage` deste
+   navegador/dispositivo — nunca no código, nunca no GitHub. Em outro
+   dispositivo, você repete esse passo uma vez (é o preço de não deixar a
+   chave no repositório).
+5. Clique em "Salvar e conectar". Se der certo, a tela mostra "✅ Conectado".
+
+`js/firebase-config.js` continua existindo só como valor de reserva — útil
+apenas se você quiser hospedar uma cópia própria e privada já pré-configurada.
+Para o uso normal, deixe-o com os placeholders e configure pela tela mesmo.
+
 
 ### Regras de segurança do Firestore
 

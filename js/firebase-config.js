@@ -1,23 +1,20 @@
 // ============================================================
-// StudyFlow — configuração do Firebase
+// StudyFlow — valor padrão (opcional) do Firebase
 // ============================================================
-// 1. Crie um projeto gratuito em https://console.firebase.google.com
-// 2. No projeto, ative o "Cloud Firestore" (Build > Firestore Database > Criar banco de dados).
-// 3. Em "Configurações do projeto" > "Geral" > "Seus apps", crie um app da Web
-//    e copie o objeto de configuração para cá, substituindo os valores abaixo.
-// 4. Salve este arquivo. O StudyFlow detecta automaticamente que o Firebase
-//    foi configurado e passa a usá-lo em vez do armazenamento local do navegador.
+// Isto NÃO é mais o lugar recomendado para colocar sua configuração real.
+// Configure o Firebase direto no site, em Configurações → Firebase — isso
+// salva os dados no localStorage deste dispositivo, sem precisar tocar no
+// código nem subir suas chaves para o GitHub.
 //
-// Enquanto os valores abaixo estiverem como "YOUR_..." o StudyFlow funciona
-// normalmente salvando os dados no armazenamento local do navegador (localStorage),
-// então você pode usar o site mesmo antes de configurar o Firebase.
+// Este arquivo só serve como valor de reserva, caso você prefira hospedar
+// uma cópia própria e privada do StudyFlow já pré-configurada. Deixe como
+// está (com os placeholders "YOUR_...") se for usar a tela de Configurações.
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyD7cmoA2OnhT7-Vm9IkwIJnulVnI78sSWs",
-  authDomain: "studyflow-46e55.firebaseapp.com",
-  projectId: "studyflow-46e55",
-  storageBucket: "studyflow-46e55.firebasestorage.app",
-  messagingSenderId: "353307442658",
-  appId: "1:353307442658:web:a7d7261318bf1592decdbb",
-  measurementId: "G-540720DPW3",
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID",
 };
