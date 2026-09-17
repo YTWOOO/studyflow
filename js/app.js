@@ -1,4 +1,4 @@
-import { Store } from './store.js?v=3';
+import { Store } from './store.js?v=5';
 
 'use strict';
 /* ============================================================
@@ -909,7 +909,7 @@ function render(){
 function normStatus(s){ return STATUS[s] ? s : 'nao_comecei'; }
 function normPriority(p){ return PRIORITY[p] ? p : 'media'; }
 
-async function createTopicsFromSpec(subjectId, nodes, parentId){
+function buildTopicsFromSpec(subjectId, nodes, parentId){
   const created = [];
   let order = topicChildren(parentId).filter(x=>x.subjectId===subjectId).length;
   for(const node of (nodes||[])){
@@ -930,25 +930,32 @@ async function createTopicsFromSpec(subjectId, nodes, parentId){
       history: Array.isArray(node.history) ? node.history : [],
     };
     State.topics.push(t);
-    await Store.save('topics', id, t);
     created.push({node, topic:t});
     const kids = node.children || node.subassuntos || node.subtopicos;
     if(Array.isArray(kids) && kids.length){
-      created.push(...await createTopicsFromSpec(subjectId, kids, id));
+      created.push(...buildTopicsFromSpec(subjectId, kids, id));
     }
   }
   return created;
 }
-async function resolveImportedPrereqs(created){
+function resolveImportedPrereqsSync(created){
   const byName = {};
   for(const {topic} of created) byName[topic.name] = topic.id;
+  const changed = [];
   for(const {node, topic} of created){
     const names = node.prerequisites || node.prerequisitos || node.preRequisitos;
     if(Array.isArray(names) && names.length){
       const ids = names.map(n=>byName[n]).filter(Boolean);
-      if(ids.length){ topic.prerequisiteIds = ids; await Store.save('topics', topic.id, topic); }
+      if(ids.length){ topic.prerequisiteIds = ids; changed.push(topic); }
     }
   }
+  return changed;
+}
+function persistTopicsInBackground(topics){
+  // Fire all writes in parallel instead of one-at-a-time, so a large import
+  // doesn't block the UI for a long time on a real network (e.g. Firestore).
+  Promise.all(topics.map(t => Store.save('topics', t.id, t)))
+    .catch(e => console.error('Falha ao salvar alguns assuntos em segundo plano:', e));
 }
 
 /* ============================================================
@@ -1249,7 +1256,7 @@ const actions = {
    * children (lista de subassuntos, mesma estrutura, recursiva).
    * Retorna { subjectId, topicIds }.
    */
-  async importSubject(data){
+  importSubject(data){
     if(!data || !data.name){ toastMsg('Para importar, informe ao menos o campo "name" da matéria.'); return null; }
     const id = uid();
     const s = {
@@ -1263,12 +1270,13 @@ const actions = {
       order: State.subjects.length,
     };
     State.subjects.push(s);
-    await Store.save('subjects', id, s);
-    const created = await createTopicsFromSpec(id, data.topics || data.assuntos || [], null);
-    await resolveImportedPrereqs(created);
+    const created = buildTopicsFromSpec(id, data.topics || data.assuntos || [], null);
+    resolveImportedPrereqsSync(created);
     State.selSubjectId = id;
     render();
     toastMsg(`Matéria "${s.name}" importada com ${created.length} assunto(s)!`);
+    Store.save('subjects', id, s).catch(e=>console.error('Falha ao salvar matéria em segundo plano:', e));
+    persistTopicsInBackground(created.map(c=>c.topic));
     return {subjectId:id, topicIds:created.map(c=>c.topic.id)};
   },
   /**
@@ -1278,12 +1286,13 @@ const actions = {
    * ou veja o id pelo console: App.state.subjects (se precisar, pergunte o id
    * mostrando a lista: App.actions.listSubjectIds()).
    */
-  async importTopics(subjectId, topicsInput){
+  importTopics(subjectId, topicsInput){
     if(!subjectOf(subjectId)){ toastMsg('Não encontrei essa matéria. Confira o id.'); return null; }
-    const created = await createTopicsFromSpec(subjectId, topicsInput || [], null);
-    await resolveImportedPrereqs(created);
+    const created = buildTopicsFromSpec(subjectId, topicsInput || [], null);
+    resolveImportedPrereqsSync(created);
     render();
     toastMsg(`${created.length} assunto(s) importado(s)!`);
+    persistTopicsInBackground(created.map(c=>c.topic));
     return created.map(c=>c.topic.id);
   },
   listSubjectIds(){
@@ -1299,10 +1308,10 @@ const actions = {
     catch(e){ toastMsg('Não consegui entender o código: ' + e.message); return; }
     this.runImportData(data);
   },
-  async runImportData(data){
-    if(Array.isArray(data)){ for(const item of data) await this.importSubject(item); return; }
-    if(data && data.subjectId && (data.topics || data.assuntos)){ await this.importTopics(data.subjectId, data.topics || data.assuntos); return; }
-    await this.importSubject(data);
+  runImportData(data){
+    if(Array.isArray(data)){ for(const item of data) this.importSubject(item); return; }
+    if(data && data.subjectId && (data.topics || data.assuntos)){ this.importTopics(data.subjectId, data.topics || data.assuntos); return; }
+    this.importSubject(data);
   },
 
   openGoalForm(){

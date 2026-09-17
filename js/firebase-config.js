@@ -19,5 +19,5 @@ export const firebaseConfig = {
   storageBucket: "studyflow-46e55.firebasestorage.app",
   messagingSenderId: "353307442658",
   appId: "1:353307442658:web:a7d7261318bf1592decdbb",
-  measurementId: "G-540720DPW3"
+  measurementId: "G-540720DPW3",
 };
