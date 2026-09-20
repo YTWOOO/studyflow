@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=8';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=12';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v8';
+const APP_VERSION = 'v12';
 
 /* ============================================================
    CONSTANTS
@@ -69,6 +69,20 @@ const BADGE_DEFS = [
   {key:'streak7', emoji:'🔥', label:'7 dias seguidos estudando', check:(s,d)=>d.streak>=7},
 ];
 
+const TASK_CATEGORY_LIST = [
+  {key:'faculdade', emoji:'📚', label:'Faculdade'},
+  {key:'ic', emoji:'🔬', label:'IC'},
+  {key:'projeto', emoji:'🛠️', label:'Projeto'},
+  {key:'pessoal', emoji:'🧍', label:'Pessoal'},
+  {key:'outros', emoji:'📦', label:'Outros'},
+];
+const TASK_CATEGORY = Object.fromEntries(TASK_CATEGORY_LIST.map(c=>[c.key,c]));
+const TASK_STATUS_LIST = [
+  {key:'pendente', label:'A Fazer'},
+  {key:'em_andamento', label:'Fazendo'},
+  {key:'concluida', label:'Feito'},
+];
+
 const WEEKDAYS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const MONTHS = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
@@ -99,21 +113,21 @@ function toastMsg(msg){
    STATE
    ============================================================ */
 const State = {
-  route:'hoje', ready:false,
-  subjects:[], topics:[], sessions:[], exams:[], goals:[], journal:[], semesters:[],
+  route:'home', ready:false,
+  subjects:[], topics:[], sessions:[], exams:[], goals:[], journal:[], semesters:[], tasks:[],
   config:{activeSemesterId:null, streak:{count:0,lastDate:null}, badges:[], theme:'auto', planning:{}},
   selSubjectId:null, mapExpanded:{}, calMonth:null, calSel:null, calTab:'mes', metasTab:'semanal', revTab:'revisar',
-  diarioDate:null, showFirebaseForm:false,
+  diarioDate:null, showFirebaseForm:false, evoTab:'geral', tarefasTab:'hoje',
 };
 
 async function loadAll(){
-  const [subjects,topics,sessions,exams,goals,journal,semesters,configArr] = await Promise.all([
+  const [subjects,topics,sessions,exams,goals,journal,semesters,configArr,tasks] = await Promise.all([
     Store.getAll('subjects'), Store.getAll('topics'), Store.getAll('sessions'),
     Store.getAll('exams'), Store.getAll('goals'), Store.getAll('journal'),
-    Store.getAll('semesters'), Store.getAll('config'),
+    Store.getAll('semesters'), Store.getAll('config'), Store.getAll('tasks'),
   ]);
   State.subjects=subjects; State.topics=topics; State.sessions=sessions; State.exams=exams;
-  State.goals=goals; State.journal=journal; State.semesters=semesters;
+  State.goals=goals; State.journal=journal; State.semesters=semesters; State.tasks=tasks;
   const cfg = configArr.find(c=>c.id==='app');
   if(cfg) State.config = {...State.config, ...cfg};
 }
@@ -238,6 +252,12 @@ async function seedIfEmpty(){
   const goalId = uid();
   const goal = {id:goalId, type:'tempo', scope:'semanal', title:'Estudar 6 horas esta semana', targetMinutes:360, subjectId:null, topicId:null, fromStatus:null, toStatus:null, createdAt:today, completed:false};
   await Store.save('goals', goalId, goal); State.goals=[goal];
+
+  const t1 = {id:uid(), title:'Fazer exercícios de integrais', description:'', dueDate:today, priority:'alta', status:'pendente', category:'faculdade', subjectId:calc, topicId:tInteg, createdAt:today, completedAt:null};
+  const t2 = {id:uid(), title:'Consertar peça 3D da IC', description:'', dueDate:today, priority:'alta', status:'pendente', category:'ic', subjectId:null, topicId:null, createdAt:today, completedAt:null};
+  const t3 = {id:uid(), title:'Revisar lista de exercícios', description:'', dueDate:addDays(today,1), priority:'media', status:'pendente', category:'faculdade', subjectId:null, topicId:null, createdAt:today, completedAt:null};
+  for(const t of [t1,t2,t3]) await Store.save('tasks', t.id, t);
+  State.tasks = [t1,t2,t3];
 }
 
 /* ============================================================
@@ -352,6 +372,54 @@ function recoveryNeeded(){
 }
 
 /* ============================================================
+   TASKS — derived helpers
+   ============================================================ */
+function taskById(id){ return State.tasks.find(t=>t.id===id); }
+function tasksOpen(){ return State.tasks.filter(t=>t.status!=='concluida'); }
+function tasksForDate(date){ return tasksOpen().filter(t=>t.dueDate===date); }
+function tasksOverdue(){ const today=todayISO(); return tasksOpen().filter(t=>t.dueDate && t.dueDate<today); }
+// "Still relevant today" = open, OR just completed today — so checking a task off
+// keeps it visible (struck through) instead of yanking it out of the list;
+// it naturally drops off the next day.
+function taskStillRelevantToday(t){ const today=todayISO(); return t.status!=='concluida' || t.completedAt===today; }
+function tasksForDateKeepDone(date){ return State.tasks.filter(t=>t.dueDate===date && taskStillRelevantToday(t)); }
+function tasksOverdueKeepDone(){ const today=todayISO(); return State.tasks.filter(t=>t.dueDate && t.dueDate<today && taskStillRelevantToday(t)); }
+function sortTasksKanban(list){
+  const open = sortTasks(list.filter(t=>t.status!=='concluida'));
+  const done = list.filter(t=>t.status==='concluida').sort((a,b)=>(b.completedAt||'').localeCompare(a.completedAt||''));
+  return [...open, ...done];
+}
+function taskPriorityWeight(t){ return PRIORITY[t.priority]? PRIORITY[t.priority].w : 0; }
+function sortTasks(list){ return [...list].sort((a,b)=> taskPriorityWeight(b)-taskPriorityWeight(a) || (a.dueDate||'9999').localeCompare(b.dueDate||'9999')); }
+function taskDueLabel(t){
+  if(!t.dueDate) return 'Sem data';
+  const today = todayISO();
+  if(t.dueDate===today) return 'Hoje';
+  if(t.dueDate===addDays(today,1)) return 'Amanhã';
+  if(t.dueDate<today) return `Atrasada · ${fmtDateShort(t.dueDate)}`;
+  return fmtDateShort(t.dueDate);
+}
+function taskRow(t){
+  const pr = PRIORITY[t.priority]||PRIORITY.media;
+  const cat = TASK_CATEGORY[t.category];
+  const subj = t.subjectId ? subjectOf(t.subjectId) : null;
+  const topic = t.topicId ? topicOf(t.topicId) : null;
+  const overdue = t.dueDate && t.dueDate<todayISO() && t.status!=='concluida';
+  return `<div class="task-row ${t.status==='concluida'?'done':''}">
+    <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${t.id}')">
+    <div class="task-body" onclick="App.actions.openTaskForm('${t.id}')">
+      <div class="task-title">${esc(t.title)}</div>
+      <div class="task-meta faint">
+        <span class="${overdue?'task-overdue':''}">${taskDueLabel(t)}</span>
+        ${pr? ` · ${pr.emoji} ${pr.label}`:''}
+        ${cat? ` · ${cat.emoji} ${cat.label}`:''}
+        ${subj? ` · ${esc(subj.name)}`:''}${topic? ` — ${esc(topic.name)}`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============================================================
    SVG CHART HELPER
    ============================================================ */
 function svgBarChart(data, opts){
@@ -389,23 +457,20 @@ function closeModal(){ $('#modal-root').innerHTML=''; }
    RENDER: SHELL / NAV
    ============================================================ */
 const NAV_ITEMS = [
-  {key:'hoje', ic:'🏠', label:'Hoje'},
-  {key:'mapa', ic:'🗺️', label:'Meu mapa'},
+  {key:'home', ic:'🏠', label:'Home'},
+  {key:'tarefas', ic:'✅', label:'Tarefas'},
   {key:'materias', ic:'📚', label:'Matérias'},
-  {key:'revisoes', ic:'🔄', label:'Revisões'},
-  {key:'evolucao', ic:'📈', label:'Minha evolução'},
-  {key:'metas', ic:'🎯', label:'Metas'},
+  {key:'ic', ic:'🔬', label:'IC'},
   {key:'calendario', ic:'📅', label:'Calendário'},
-  {key:'diario', ic:'📝', label:'Diário'},
-  {key:'semestre', ic:'🎓', label:'Meu semestre'},
+  {key:'evolucao', ic:'📊', label:'Evolução'},
   {key:'config', ic:'⚙️', label:'Configurações'},
 ];
 const BOTTOM_ITEMS = [
-  {key:'hoje', ic:'🏠', label:'Hoje'},
-  {key:'mapa', ic:'🗺️', label:'Mapa'},
-  {key:'registrar', ic:'➕', label:'Registrar', fab:true},
-  {key:'evolucao', ic:'📈', label:'Evolução'},
+  {key:'home', ic:'🏠', label:'Home'},
+  {key:'tarefas', ic:'✅', label:'Tarefas'},
+  {key:'registrar', ic:'➕', label:'Adicionar', fab:true},
   {key:'materias', ic:'📚', label:'Matérias'},
+  {key:'evolucao', ic:'📊', label:'Evolução'},
 ];
 function renderNav(){
   $('#side-nav').innerHTML = NAV_ITEMS.map(n=>`<button class="nav-item ${State.route===n.key?'active':''}" onclick="App.actions.goRoute('${n.key}')"><span class="ic">${n.ic}</span>${n.label}</button>`).join('');
@@ -421,21 +486,16 @@ function renderNav(){
 /* ============================================================
    VIEW: HOJE
    ============================================================ */
-function viewHoje(){
+function viewHome(){
   const today = todayISO();
-  const weekStart = startOfWeek(today);
-  const wk = weekStats(weekStart);
-  const todayMin = sessionsInRange(today,today).reduce((a,s)=>a+s.minutes,0);
-  const counts = {
-    andamento: State.topics.filter(t=>['aprendendo','dificuldade','preciso_aprender'].includes(t.status)).length,
-    revisoes: State.topics.filter(t=>t.reviewDueDate && t.reviewDueDate<=today && t.status!=='concluido').length,
-    concluidos: State.topics.filter(t=>t.status==='concluido').length,
-  };
-  const queue = suggestedQueue(6);
   const recov = recoveryNeeded();
-  const badges = computeBadges();
 
-  let html = `<div class="page-head"><div><h2>Hoje</h2><p class="muted">${esc(fmtDateLong(today))}</p></div></div>`;
+  const todayTasks = sortTasksKanban([...tasksForDateKeepDone(today), ...tasksOverdueKeepDone()]);
+  const doneToday = todayTasks.filter(t=>t.status==='concluida').length;
+  const totalToday = todayTasks.length;
+  const pct = totalToday? Math.round(doneToday/totalToday*100) : 0;
+
+  let html = `<div class="page-head"><div><h2>Home</h2><p class="muted">${esc(fmtDateLong(today))}</p></div></div>`;
 
   if(recov){
     html += `<div class="banner"><span class="x">⚠️</span><div style="flex:1">
@@ -448,43 +508,97 @@ function viewHoje(){
       </div></div></div>`;
   }
 
-  html += `<div class="grid cols-4" style="margin-bottom:18px">
-    <div class="stat"><div class="num">${minToHM(todayMin)}</div><div class="lbl">Tempo hoje</div></div>
-    <div class="stat"><div class="num">${minToHM(wk.minutes)}</div><div class="lbl">Tempo na semana</div></div>
-    <div class="stat"><div class="num">${counts.andamento}</div><div class="lbl">Em andamento</div></div>
-    <div class="stat"><div class="num">${counts.revisoes}</div><div class="lbl">Revisões pendentes</div></div>
-  </div>`;
+  if(totalToday>0){
+    html += `<div class="row between faint" style="margin-bottom:6px"><span>${doneToday} de ${totalToday} tarefas concluídas hoje</span><span>${pct}%</span></div>
+    <div class="bar" style="margin-bottom:18px"><span style="width:${pct}%"></span></div>`;
+  }
 
-  html += `<h3 style="margin-bottom:10px">🎯 O que estudar agora?</h3>`;
-  if(!queue.length){
-    html += `<div class="empty card"><div class="big">🌤️</div><p>Nada urgente agora. Que tal <a href="#" onclick="event.preventDefault();App.actions.goRoute('materias')">cadastrar uma matéria</a> ou revisar algo que já estudou?</p></div>`;
-  } else {
-    html += `<div class="stack">` + queue.map(({t,reasons})=>{
-      const subj = subjectOf(t.subjectId);
-      const st = STATUS[t.status];
-      const mins = SUGGESTED_MIN[t.status];
-      const reasonTxt = reasons.length? `<p class="faint" style="margin-top:6px">Sugerido porque ${reasons.slice(0,2).join(' e ')}.</p>` : '';
-      return `<div class="sugg-card" style="border-left-color:var(--${t.status})">
-        <div class="body">
-          <div class="row between"><h4>${st.emoji} ${esc(t.name)}</h4><span class="faint">${esc(subj?subj.name:'')}</span></div>
-          <p class="muted" style="font-size:13.5px">Próximo passo: ${esc(t.nextStep||'definir o próximo passo')}</p>
-          <p class="faint">⏱ ${mins} minutos sugeridos</p>
-          ${reasonTxt}
-        </div>
-        <div style="align-self:center"><button class="btn primary sm" onclick="App.actions.startSession('${t.id}')">Começar</button></div>
+  html += `<div class="row between" style="margin-bottom:10px"><h3>📌 Para fazer</h3></div>`;
+  html += todayTasks.length
+    ? `<div class="stack" style="margin-bottom:8px">${todayTasks.map(taskRow).join('')}</div>`
+    : `<div class="empty card" style="margin-bottom:8px"><p class="faint">Nada pendente pra hoje. 🎉</p></div>`;
+  html += `<button class="btn block sm" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null,'${today}')">➕ Adicionar tarefa</button>`;
+
+  const priSubjects = [...State.subjects].filter(s=>s.priority==='alta')
+    .concat(State.subjects.filter(s=>s.priority!=='alta')).slice(0,4);
+  if(priSubjects.length){
+    html += `<h3 style="margin-bottom:10px">🔴 Matérias com prioridade</h3><div class="stack" style="margin-bottom:22px">` + priSubjects.map(s=>{
+      const prog = subjectProgress(s.id); const c = subjectCounts(s.id);
+      return `<div class="card" style="cursor:pointer" onclick="App.actions.goRoute('materias');App.actions.selectSubject('${s.id}')">
+        <div class="row between"><h4>${s.icon} ${esc(s.name)}</h4><span class="chip pr-${s.priority}">${PRIORITY[s.priority].emoji} ${PRIORITY[s.priority].label}</span></div>
+        <div class="bar" style="margin:8px 0 6px"><span style="width:${prog}%; background:${s.color}"></span></div>
+        <div class="row wrap faint" style="gap:10px"><span>${prog}%</span>${c.atencao? `<span>⚠️ ${c.atencao} precisa${c.atencao!==1?'m':''} de atenção</span>`:''}</div>
       </div>`;
     }).join('') + `</div>`;
   }
 
-  html += `<h3 style="margin:22px 0 10px">🏅 Conquistas</h3><div class="badge-row">` +
-    BADGE_DEFS.map(b=>`<div class="badge ${badges.includes(b.key)?'earned':''}"><div class="b-ic">${b.emoji}</div>${b.label}</div>`).join('') + `</div>`;
+  const queue = suggestedQueue(3);
+  if(queue.length){
+    html += `<h3 style="margin-bottom:10px">📚 Sugestão de estudo</h3><div class="stack">` + queue.map(({t})=>{
+      const subj = subjectOf(t.subjectId); const st = STATUS[t.status];
+      return `<div class="sugg-card" style="border-left-color:var(--${t.status})">
+        <div class="body">
+          <div class="row between"><h4 style="font-size:14px">${st.emoji} ${esc(t.name)}</h4><span class="faint">${esc(subj?subj.name:'')}</span></div>
+        </div>
+        <div style="align-self:center"><button class="btn sm" onclick="App.actions.startSession('${t.id}')">Começar</button></div>
+      </div>`;
+    }).join('') + `</div>`;
+  }
 
   return html;
 }
 
 /* ============================================================
-   VIEW: MAPA
+   VIEW: TAREFAS
    ============================================================ */
+function viewTarefas(){
+  const today = todayISO(), tomorrow = addDays(today,1);
+  const tabs = [
+    {key:'todas', label:'Todas'}, {key:'hoje', label:'Hoje'}, {key:'amanha', label:'Amanhã'},
+    {key:'atrasadas', label:'Atrasadas'}, {key:'concluidas', label:'Concluídas'},
+  ];
+  let list;
+  if(State.tarefasTab==='hoje') list = tasksForDateKeepDone(today);
+  else if(State.tarefasTab==='amanha') list = tasksForDateKeepDone(tomorrow);
+  else if(State.tarefasTab==='atrasadas') list = tasksOverdueKeepDone();
+  else if(State.tarefasTab==='concluidas') list = State.tasks.filter(t=>t.status==='concluida');
+  else list = State.tasks;
+  list = State.tarefasTab==='concluidas' ? sortTasks(list) : sortTasksKanban(list);
+
+  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary sm" onclick="App.actions.openTaskForm()">➕ Nova tarefa</button></div>
+  <div class="tabs">${tabs.map(t=>`<button class="${State.tarefasTab===t.key?'sel':''}" onclick="App.actions.setTarefasTab('${t.key}')">${t.label}</button>`).join('')}</div>`;
+  html += list.length? `<div class="stack">${list.map(taskRow).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
+  return html;
+}
+
+/* ============================================================
+   VIEW: IC (quadro kanban)
+   ============================================================ */
+function icTaskCard(t){
+  const hasDate = !!t.dueDate;
+  return `<div class="card ic-card ${t.status==='concluida'?'done':''}" style="margin-bottom:8px"
+      draggable="true" ondragstart="App.actions.icDragStart(event,'${t.id}')" ondragend="App.actions.icDragEnd(event)">
+    <div class="ic-card-title" onclick="App.actions.openTaskForm('${t.id}')">${esc(t.title)}</div>
+    ${hasDate? `<div class="faint" style="font-size:11.5px; margin-top:2px">${taskDueLabel(t)}</div>` : ''}
+    <div class="row" style="margin-top:8px">
+      <button class="btn sm ${hasDate?'':'ghost'}" style="margin-left:auto" onclick="App.actions.toggleTaskHome('${t.id}')">${hasDate? '✅ na Home' : '→ Home'}</button>
+    </div>
+  </div>`;
+}
+function viewIC(){
+  const icTasks = State.tasks.filter(t=>t.category==='ic');
+  let html = `<div class="page-head"><h2>IC</h2></div><p class="faint" style="margin-bottom:12px">Arraste um card e solte em outra coluna pra mudar a etapa.</p>`;
+  html += `<div class="kanban">` + TASK_STATUS_LIST.map(col=>{
+    const items = icTasks.filter(t=>t.status===col.key);
+    return `<div class="kanban-col" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over');App.actions.icDrop(event,'${col.key}')">
+      <div class="row between" style="margin-bottom:8px"><h4>${col.label}</h4></div>
+      <button class="btn sm block ghost" style="margin-bottom:10px" onclick="App.actions.openTaskForm(null,null,'ic','${col.key}')">+ Adicionar tarefa</button>
+      ${items.length? items.map(icTaskCard).join('') : '<p class="faint" style="font-size:12.5px">Nada aqui ainda.</p>'}
+    </div>`;
+  }).join('') + `</div>`;
+  return html;
+}
+
 function renderTopicNode(t, depth){
   const children = topicChildren(t.id);
   const expanded = !!State.mapExpanded[t.id];
@@ -499,50 +613,27 @@ function renderTopicNode(t, depth){
     ${children.length && expanded? `<div class="tree-children">${children.map(c=>renderTopicNode(c,depth+1)).join('')}</div>` : ''}
   </div>`;
 }
-function viewMapa(){
-  if(!State.subjects.length){
-    return `<div class="page-head"><h2>Meu mapa</h2></div><div class="empty card"><div class="big">🗺️</div><p>Cadastre sua primeira matéria para começar a construir seu mapa de estudos.</p><button class="btn primary" onclick="App.actions.goRoute('materias')">Ir para Matérias</button></div>`;
-  }
-  if(!State.selSubjectId || !subjectOf(State.selSubjectId)) State.selSubjectId = State.subjects[0].id;
-  const subj = subjectOf(State.selSubjectId);
-  const counts = subjectCounts(subj.id);
-  const prog = subjectProgress(subj.id);
-  const roots = topicChildren(null).filter(t=>t.subjectId===subj.id);
-
-  let html = `<div class="page-head"><h2>Meu mapa</h2></div>
-  <div class="pill-row" style="margin-bottom:16px">${State.subjects.map(s=>`<button class="pill ${s.id===subj.id?'sel':''}" onclick="App.actions.selectSubject('${s.id}')">${s.icon} ${esc(s.name)}</button>`).join('')}</div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="row between"><h3>${subj.icon} ${esc(subj.name)}</h3><span class="chip pr-${subj.priority}">${PRIORITY[subj.priority].emoji} ${PRIORITY[subj.priority].label}</span></div>
-    <div class="bar" style="margin:10px 0 8px"><span style="width:${prog}%; background:${subj.color}"></span></div>
-    <div class="row wrap faint" style="gap:14px">
-      <span>${counts.total} assuntos</span><span>✅ ${counts.concluidos} concluídos</span>
-      <span>🔶 ${counts.andamento} em andamento</span><span>⚠️ ${counts.atencao} com dificuldade</span><span>🔄 ${counts.revisoes} revisões</span>
-    </div>
-  </div>
-  <div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="App.actions.openTopicForm(null,'${subj.id}')">+ Adicionar assunto</button></div>
-  <div class="card">${roots.length? roots.map(t=>renderTopicNode(t,0)).join('') : '<p class="muted">Nenhum assunto cadastrado ainda nesta matéria.</p>'}</div>`;
-  return html;
-}
-
 /* ============================================================
-   VIEW: MATÉRIAS
+   VIEW: MATÉRIAS (grade de matérias → clique abre os assuntos)
    ============================================================ */
 function viewMaterias(){
-  let html = `<div class="page-head"><h2>Matérias</h2><button class="btn primary" onclick="App.actions.openSubjectForm(null)">+ Nova matéria</button></div>`;
+  if(State.selSubjectId && subjectOf(State.selSubjectId)) return viewSubjectDetail(subjectOf(State.selSubjectId));
+
+  let html = `<div class="page-head"><h2>Matérias</h2><button class="btn primary sm" onclick="App.actions.openSubjectForm(null)">+ Nova matéria</button></div>`;
   if(!State.subjects.length){
     html += `<div class="empty card"><div class="big">📚</div><p>Nenhuma matéria cadastrada ainda.</p></div>`;
   } else {
     html += `<div class="grid cols-2">` + State.subjects.map(s=>{
       const prog = subjectProgress(s.id); const c = subjectCounts(s.id);
-      return `<div class="card">
-        <div class="row between" style="cursor:pointer" onclick="App.actions.selectSubject('${s.id}');App.actions.goRoute('mapa')">
+      return `<div class="card" style="cursor:pointer" onclick="App.actions.selectSubject('${s.id}')">
+        <div class="row between">
           <div class="row"><span class="tag-swatch" style="background:${s.color}"></span><h4>${s.icon} ${esc(s.name)}</h4></div>
           <button class="icon-btn" onclick="event.stopPropagation();App.actions.openSubjectForm('${s.id}')">✎</button>
         </div>
+        <span class="chip pr-${s.priority}" style="margin-top:6px">${PRIORITY[s.priority].emoji} Prioridade ${PRIORITY[s.priority].label.toLowerCase()}</span>
         <div class="bar" style="margin:10px 0 8px"><span style="width:${prog}%; background:${s.color}"></span></div>
         <div class="row wrap faint" style="gap:10px">
-          <span>${c.total} assuntos</span><span>✅ ${c.concluidos}</span><span>🔶 ${c.andamento}</span>
-          ${s.professor? `<span>· ${esc(s.professor)}</span>`:''}
+          <span>${prog}%</span>${c.atencao? `<span>⚠️ ${c.atencao} assunto${c.atencao!==1?'s':''} precisa${c.atencao!==1?'m':''} de atenção</span>`:''}
         </div>
       </div>`;
     }).join('') + `</div>`;
@@ -550,13 +641,31 @@ function viewMaterias(){
   const conquered = State.topics.filter(t=>t.status==='concluido').sort((a,b)=>{
     const ha=(a.history||[]).slice(-1)[0], hb=(b.history||[]).slice(-1)[0];
     return (hb?hb.date:'').localeCompare(ha?ha.date:'');
-  }).slice(0,8);
-  html += `<h3 style="margin:22px 0 10px">🏆 Assuntos conquistados</h3>`;
-  html += conquered.length? `<div class="stack">${conquered.map(t=>{
-      const subj=subjectOf(t.subjectId); const h=(t.history||[]).slice(-1)[0];
-      return `<div class="card row between"><span>✅ ${esc(t.name)} <span class="faint">— ${esc(subj?subj.name:'')}</span></span><span class="faint">${h?fmtDateShort(h.date):''}</span></div>`;
-    }).join('')}</div>` : `<p class="muted">Ainda nenhum assunto concluído — continue estudando!</p>`;
+  }).slice(0,6);
+  if(conquered.length){
+    html += `<h3 style="margin:22px 0 10px">🏆 Assuntos conquistados</h3><div class="stack">${conquered.map(t=>{
+        const subj=subjectOf(t.subjectId); const h=(t.history||[]).slice(-1)[0];
+        return `<div class="card row between"><span>✅ ${esc(t.name)} <span class="faint">— ${esc(subj?subj.name:'')}</span></span><span class="faint">${h?fmtDateShort(h.date):''}</span></div>`;
+      }).join('')}</div>`;
+  }
   return html;
+}
+function viewSubjectDetail(subj){
+  const counts = subjectCounts(subj.id);
+  const prog = subjectProgress(subj.id);
+  const roots = topicChildren(null).filter(t=>t.subjectId===subj.id);
+  return `<div class="row" style="margin-bottom:14px"><button class="btn sm ghost" onclick="App.actions.backToMaterias()">← Matérias</button></div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="row between"><h3>${subj.icon} ${esc(subj.name)}</h3><span class="chip pr-${subj.priority}">${PRIORITY[subj.priority].emoji} ${PRIORITY[subj.priority].label}</span></div>
+    <div class="bar" style="margin:10px 0 8px"><span style="width:${prog}%; background:${subj.color}"></span></div>
+    <div class="row wrap faint" style="gap:14px">
+      <span>Progresso: ${prog}%</span><span>✅ ${counts.concluidos} concluídos</span>
+      ${counts.atencao? `<span>⚠️ ${counts.atencao} com dificuldade</span>`:''}${counts.revisoes? `<span>🔄 ${counts.revisoes} revisões</span>`:''}
+    </div>
+  </div>
+  <div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="App.actions.openTopicForm(null,'${subj.id}')">+ Adicionar assunto</button></div>
+  <h3 style="margin-bottom:10px">Assuntos</h3>
+  <div class="card">${roots.length? roots.map(t=>renderTopicNode(t,0)).join('') : '<p class="muted">Nenhum assunto cadastrado ainda nesta matéria.</p>'}</div>`;
 }
 
 /* ============================================================
@@ -565,8 +674,7 @@ function viewMaterias(){
 function viewRevisoes(){
   const {toLearn,toReview,completed} = reviewLists();
   const today = todayISO();
-  let html = `<div class="page-head"><h2>Revisões</h2></div>
-  <div class="tabs">
+  let html = `<div class="tabs">
     <button class="${State.revTab==='aprender'?'sel':''}" onclick="App.actions.setRevTab('aprender')">📖 Para aprender (${toLearn.length})</button>
     <button class="${State.revTab==='revisar'?'sel':''}" onclick="App.actions.setRevTab('revisar')">🔄 Para revisar (${toReview.length})</button>
     <button class="${State.revTab==='concluidos'?'sel':''}" onclick="App.actions.setRevTab('concluidos')">✅ Concluídos (${completed.length})</button>
@@ -599,14 +707,26 @@ function viewRevisoes(){
    VIEW: EVOLUÇÃO
    ============================================================ */
 function viewEvolucao(){
+  const tabs = [
+    {key:'geral', label:'Visão geral'}, {key:'revisoes', label:'Revisões'},
+    {key:'metas', label:'Metas'}, {key:'diario', label:'Diário'}, {key:'semestre', label:'Semestre'},
+  ];
+  let html = `<div class="page-head"><h2>Evolução</h2></div>
+  <div class="tabs">${tabs.map(t=>`<button class="${State.evoTab===t.key?'sel':''}" onclick="App.actions.setEvoTab('${t.key}')">${t.label}</button>`).join('')}</div>`;
+  const map = {geral:viewEvolucaoGeral, revisoes:viewRevisoes, metas:viewMetas, diario:viewDiario, semestre:viewSemestre};
+  html += (map[State.evoTab]||viewEvolucaoGeral)();
+  return html;
+}
+function viewEvolucaoGeral(){
   const totalMin = State.sessions.reduce((a,s)=>a+s.minutes,0);
   const concl = State.topics.filter(t=>t.status==='concluido').length;
   const improved = State.sessions.filter(s=>s.improved==='sim'||s.improved==='muito').length;
   const streak = computeStreak();
   const thisWeekStart = startOfWeek(todayISO());
   const wk = weekStats(thisWeekStart);
+  const badges = computeBadges();
 
-  let html = `<div class="page-head"><h2>Minha evolução</h2></div>
+  let html = `
   <div class="grid cols-4" style="margin-bottom:18px">
     <div class="stat"><div class="num">${minToHM(totalMin)}</div><div class="lbl">Tempo total estudado</div></div>
     <div class="stat"><div class="num">${State.sessions.length}</div><div class="lbl">Sessões realizadas</div></div>
@@ -659,6 +779,8 @@ function viewEvolucao(){
       ${h.note? `<div class="faint">"${esc(h.note)}"</div>`:''}
     </div>`).join('') : `<p class="muted">Nenhum registro ainda.</p>`;
   html += `</div>`;
+  html += `<h3 style="margin:22px 0 10px">🏅 Conquistas</h3><div class="badge-row">` +
+    BADGE_DEFS.map(b=>`<div class="badge ${badges.includes(b.key)?'earned':''}"><div class="b-ic">${b.emoji}</div>${b.label}</div>`).join('') + `</div>`;
   return html;
 }
 function lastNWeeksMinutes(n){
@@ -693,7 +815,7 @@ function goalProgress(g){
   return g.completed? 100:0;
 }
 function viewMetas(){
-  let html = `<div class="page-head"><h2>Metas</h2><button class="btn primary" onclick="App.actions.openGoalForm()">+ Nova meta</button></div>
+  let html = `<div class="row" style="margin-bottom:12px"><button class="btn sm primary" onclick="App.actions.openGoalForm()">+ Nova meta</button></div>
   <div class="tabs">${['diaria','semanal','mensal','semestre'].map(sc=>`<button class="${State.metasTab===sc?'sel':''}" onclick="App.actions.setMetasTab('${sc}')">${sc[0].toUpperCase()+sc.slice(1)}${sc==='diaria'?'s':sc==='semanal'?'is':sc==='mensal'?'ais':''}</button>`).join('')}</div>`;
   const goals = State.goals.filter(g=>g.scope===State.metasTab);
   if(!goals.length){ html += `<div class="empty card"><div class="big">🎯</div><p>Nenhuma meta ${State.metasTab} ainda.</p></div>`; return html; }
@@ -748,21 +870,31 @@ function viewCalMonth(){
     if(State.sessions.some(s=>s.date===c)) dots.push('var(--sage)');
     if(State.exams.some(e=>e.date===c)) dots.push('var(--danger)');
     if(State.topics.some(t=>t.reviewDueDate===c)) dots.push('var(--revisar)');
+    if(State.tasks.some(tk=>tk.dueDate===c && tk.status!=='concluida')) dots.push('var(--accent)');
     html += `<div class="month-cell ${c===today?'today':''} ${c===State.calSel?'sel':''}" onclick="App.actions.calSelectDay('${c}')">
       <span>${parseISO(c).getDate()}</span><div class="dots">${dots.map(dc=>`<span class="dot" style="background:${dc}"></span>`).join('')}</div>
     </div>`;
   }
-  html += `</div>`;
+  html += `</div>
+  <div class="row wrap faint" style="gap:12px; margin-top:10px; font-size:11.5px">
+    <span><span class="dot" style="background:var(--sage); display:inline-block; margin-right:4px"></span>Estudo</span>
+    <span><span class="dot" style="background:var(--danger); display:inline-block; margin-right:4px"></span>Prova</span>
+    <span><span class="dot" style="background:var(--revisar); display:inline-block; margin-right:4px"></span>Revisão</span>
+    <span><span class="dot" style="background:var(--accent); display:inline-block; margin-right:4px"></span>Tarefa</span>
+  </div>`;
   if(State.calSel){
     const c=State.calSel;
     const sess = State.sessions.filter(s=>s.date===c);
     const ex = State.exams.filter(e=>e.date===c);
     const rev = State.topics.filter(t=>t.reviewDueDate===c);
+    const tks = State.tasks.filter(tk=>tk.dueDate===c);
     html += `<div class="card" style="margin-top:14px"><h4>${fmtDateFull(c)}</h4>`;
-    if(!sess.length && !ex.length && !rev.length) html += `<p class="muted">Nada registrado neste dia.</p>`;
+    if(!sess.length && !ex.length && !rev.length && !tks.length) html += `<p class="muted">Nada registrado neste dia.</p>`;
     sess.forEach(s=>{ const t=topicOf(s.topicId); html+=`<p class="faint">📚 ${esc(t?t.name:'')} — ${minToHM(s.minutes)}</p>`; });
     ex.forEach(e=>{ html+=`<p class="faint">📝 ${esc(e.title)}</p>`; });
     rev.forEach(t=>{ html+=`<p class="faint">🔄 Revisar: ${esc(t.name)}</p>`; });
+    tks.forEach(tk=>{ html+=`<p class="faint">${tk.status==='concluida'?'✅':'☐'} ${esc(tk.title)}</p>`; });
+    html += `<button class="btn sm" style="margin-top:8px" onclick="App.actions.openExamForm('${c}')">+ Adicionar prova/entrega nesta data</button>`;
     html += `</div>`;
   }
   return html;
@@ -809,8 +941,7 @@ function viewCalPlano(){
 function viewDiario(){
   const today = todayISO();
   const jToday = State.journal.find(j=>j.id===today);
-  let html = `<div class="page-head"><h2>Diário de estudos</h2></div>
-  <div class="card" style="margin-bottom:18px">
+  let html = `<div class="card" style="margin-bottom:18px">
     <h4>O que aconteceu hoje?</h4>
     <textarea id="journal-today" placeholder="Escreva livremente sobre o seu dia de estudos...">${esc(jToday?jToday.note:'')}</textarea>
     <button class="btn primary sm" style="margin-top:8px" onclick="App.actions.saveJournalToday()">Salvar</button>
@@ -836,7 +967,7 @@ function viewDiario(){
    ============================================================ */
 function viewSemestre(){
   const sem = State.semesters.find(s=>s.id===State.config.activeSemesterId) || State.semesters[0];
-  let html = `<div class="page-head"><h2>Meu semestre</h2><button class="btn sm" onclick="App.actions.openSemesterForm()">+ Novo semestre</button></div>`;
+  let html = `<div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="App.actions.openSemesterForm()">+ Novo semestre</button></div>`;
   if(!sem){ html += `<p class="muted">Nenhum semestre cadastrado.</p>`; return html; }
   const subs = State.subjects.filter(s=>s.semesterId===sem.id);
   const allTopics = subs.flatMap(s=>subjectTopics(s.id));
@@ -899,18 +1030,18 @@ function viewConfig(){
       <button class="btn sm" onclick="App.actions.retryFirebase()">🔄 Tentar conectar de novo</button>
       <button class="btn sm" onclick="App.actions.toggleFirebaseForm()">${State.showFirebaseForm?'Ocultar configuração':'⚙️ Configurar Firebase'}</button>
     </div>
-    ${State.showFirebaseForm ? (()=>{ const cfg = getActiveFirebaseConfig() || {}; const savedHere = !!getStoredFirebaseConfig();
+    ${State.showFirebaseForm ? (()=>{ const cfg = getActiveFirebaseConfig(); const savedHere = !!getStoredFirebaseConfig();
+      const showCfg = (cfg && cfg.apiKey && !String(cfg.apiKey).startsWith('YOUR_')) ? cfg : null;
       return `<div class="card" style="background:var(--paper-sunken); margin-top:12px">
-        <p class="faint">Isso fica salvo só no armazenamento local <strong>deste navegador</strong> — nunca vai para o código nem para o GitHub. Pegue esses valores em Configurações do projeto → Geral → Seus apps, no console do Firebase.</p>
-        <label class="field">apiKey<input type="password" id="fb-apiKey" value="${esc(cfg.apiKey&&!String(cfg.apiKey).startsWith('YOUR_')?cfg.apiKey:'')}"></label>
-        <label class="field">authDomain<input type="text" id="fb-authDomain" value="${esc(cfg.authDomain||'')}"></label>
-        <label class="field">projectId<input type="text" id="fb-projectId" value="${esc(cfg.projectId||'')}"></label>
-        <label class="field">storageBucket<input type="text" id="fb-storageBucket" value="${esc(cfg.storageBucket||'')}"></label>
-        <div class="field-row">
-          <label class="field">messagingSenderId<input type="text" id="fb-messagingSenderId" value="${esc(cfg.messagingSenderId||'')}"></label>
-          <label class="field">appId<input type="text" id="fb-appId" value="${esc(cfg.appId||'')}"></label>
-        </div>
-        <label class="field">measurementId (opcional)<input type="text" id="fb-measurementId" value="${esc(cfg.measurementId||'')}"></label>
+        <p class="faint">Isso fica salvo só no armazenamento local <strong>deste navegador</strong> — nunca vai para o código nem para o GitHub. Cole aqui o objeto inteiro, do jeito que aparece no console do Firebase (Configurações do projeto → Geral → Seus apps).</p>
+        <textarea id="fb-config-raw" rows="9" style="font-family:monospace; font-size:12px" placeholder="{
+  apiKey: 'AIza...',
+  authDomain: 'seu-projeto.firebaseapp.com',
+  projectId: 'seu-projeto',
+  storageBucket: 'seu-projeto.appspot.com',
+  messagingSenderId: '123456789',
+  appId: '1:123456789:web:abcdef'
+}">${showCfg? esc(JSON.stringify(showCfg,null,2)) : ''}</textarea>
         <div class="row wrap" style="margin-top:6px">
           <button class="btn primary sm" onclick="App.actions.saveFirebaseConfigForm()">Salvar e conectar</button>
           ${savedHere?`<button class="btn sm danger" onclick="App.actions.clearFirebaseConfigForm()">Remover deste dispositivo</button>`:''}
@@ -950,11 +1081,10 @@ function firebaseErrorBanner(){
 function render(){
   renderNav();
   const map = {
-    hoje:viewHoje, mapa:viewMapa, materias:viewMaterias, revisoes:viewRevisoes,
-    evolucao:viewEvolucao, metas:viewMetas, calendario:viewCalendario, diario:viewDiario,
-    semestre:viewSemestre, config:viewConfig,
+    home:viewHome, tarefas:viewTarefas, materias:viewMaterias, ic:viewIC,
+    calendario:viewCalendario, evolucao:viewEvolucao, config:viewConfig,
   };
-  const fn = map[State.route] || viewHoje;
+  const fn = map[State.route] || viewHome;
   $('#app').innerHTML = firebaseErrorBanner() + fn();
 }
 
@@ -1026,18 +1156,18 @@ const actions = {
   setTheme(t){ State.config.theme=t; applyTheme(); saveConfig(); render(); },
   toggleFirebaseForm(){ State.showFirebaseForm = !State.showFirebaseForm; render(); },
   async saveFirebaseConfigForm(){
-    const apiKey = $('#fb-apiKey').value.trim();
-    const projectId = $('#fb-projectId').value.trim();
-    if(!apiKey || !projectId){ toastMsg('Preencha ao menos apiKey e projectId.'); return; }
-    const cfg = {
-      apiKey,
-      authDomain: $('#fb-authDomain').value.trim() || `${projectId}.firebaseapp.com`,
-      projectId,
-      storageBucket: $('#fb-storageBucket').value.trim() || `${projectId}.appspot.com`,
-      messagingSenderId: $('#fb-messagingSenderId').value.trim(),
-      appId: $('#fb-appId').value.trim(),
-      measurementId: $('#fb-measurementId').value.trim() || undefined,
-    };
+    const raw = $('#fb-config-raw').value.trim();
+    if(!raw){ toastMsg('Cole o objeto de configuração do Firebase.'); return; }
+    // Accept the whole snippet copied from the Firebase console, e.g.
+    // "const firebaseConfig = { ... };" — strip that wrapper if present.
+    const cleaned = raw
+      .replace(/^\s*(export\s+)?(const|let|var)\s+\w+\s*=\s*/,'')
+      .replace(/;\s*$/,'');
+    let cfg;
+    try{ cfg = (new Function('return (' + cleaned + ')'))(); }
+    catch(e){ toastMsg('Não consegui entender o que foi colado: ' + e.message); return; }
+    if(!cfg || typeof cfg!=='object'){ toastMsg('Isso não parece um objeto de configuração válido.'); return; }
+    if(!cfg.apiKey || !cfg.projectId){ toastMsg('Faltam apiKey e/ou projectId nesse objeto.'); return; }
     if(!setStoredFirebaseConfig(cfg)){ toastMsg('Não foi possível salvar (armazenamento local indisponível).'); return; }
     toastMsg('Configuração salva neste dispositivo. Conectando...');
     await this.retryFirebase();
@@ -1060,14 +1190,24 @@ const actions = {
     render();
   },
   selectSubject(id){ State.selSubjectId=id; render(); },
+  backToMaterias(){ State.selSubjectId=null; render(); },
   toggleExpand(id){ State.mapExpanded[id]=!State.mapExpanded[id]; render(); },
   setRevTab(t){ State.revTab=t; render(); },
   setMetasTab(t){ State.metasTab=t; render(); },
   setCalTab(t){ State.calTab=t; render(); },
+  setEvoTab(t){ State.evoTab=t; render(); },
+  setTarefasTab(t){ State.tarefasTab=t; render(); },
   calNav(dir){ const d=parseISO(State.calMonth); d.setMonth(d.getMonth()+dir); State.calMonth=isoDate(d); render(); },
   calSelectDay(d){ State.calSel = State.calSel===d? null : d; render(); },
 
   openQuickRegister(){
+    openModal('O que você quer adicionar?', `
+      <div class="stack">
+        <button class="btn block" onclick="App.actions.closeModal();App.actions.openTaskForm()">✅ Nova tarefa</button>
+        <button class="btn block" onclick="App.actions.openQuickSession()">📚 Registrar sessão de estudo</button>
+      </div>`);
+  },
+  openQuickSession(){
     const opts = State.topics.filter(t=>t.status!=='concluido').map(t=>{ const s=subjectOf(t.subjectId); return `<option value="${t.id}">${esc(s?s.name+' — ':'')}${esc(t.name)}</option>`; }).join('');
     openModal('Registrar sessão de estudo', `
       <label class="field">Qual assunto você estudou?
@@ -1137,6 +1277,7 @@ const actions = {
     const history = (t.history||[]).slice().reverse();
     const exam = nearestExamDaysFor(t.id);
     const otherTopics = subjectTopics(t.subjectId).filter(x=>x.id!==t.id);
+    const relatedTasks = State.tasks.filter(tk=>tk.topicId===t.id);
 
     let body = `<p class="faint">${esc(subj?subj.name:'')}</p>
     <div class="row between" style="margin-bottom:10px">
@@ -1146,42 +1287,76 @@ const actions = {
 
     if(weak.length) body += `<div class="banner" style="margin-bottom:14px"><span class="x">⚠️</span><div>Este assunto depende de <strong>${esc(weak[0].name)}</strong>. Você marcou "${esc(weak[0].name)}" como "${STATUS[weak[0].status].label}".</div></div>`;
 
-    body += `<label class="field">Status atual
-      <div class="emoji-pick">${STATUS_LIST.map(s=>`<button type="button" class="${t.status===s.key?'sel':''}" onclick="App.actions.beginStatusChange('${t.id}','${s.key}')">${s.emoji} ${s.label}</button>`).join('')}</div>
+    // --- primary, always-visible screen ---
+    body += `<input type="hidden" id="td-status-pick" value="${t.status}">
+    <label class="field">Como você está com este assunto?
+      <div class="emoji-pick">${STATUS_LIST.map(s=>`<button type="button" class="${t.status===s.key?'sel':''}" onclick="App.actions.pickTopicStatus(this,'${s.key}')">${s.emoji} ${s.label}</button>`).join('')}</div>
     </label>
-    <div id="td-status-update"></div>
+    <label class="field">Próximo passo<textarea id="td-next" placeholder="O que fazer na próxima vez que estudar isso?">${esc(t.nextStep)}</textarea></label>
+    <button class="btn primary block" onclick="App.actions.saveTopicQuick('${t.id}')">Salvar</button>
 
-    <label class="field">Próximo passo<textarea id="td-next" onchange="App.actions.saveField('${t.id}','nextStep',this.value)">${esc(t.nextStep)}</textarea></label>
-    <label class="field">Depois... (opcional)<textarea id="td-then" onchange="App.actions.saveField('${t.id}','thenStep',this.value)">${esc(t.thenStep)}</textarea></label>
+    ${relatedTasks.length? `<hr class="divider"><p class="faint" style="margin-bottom:6px">✅ Tarefas relacionadas</p>
+      <div class="stack">${relatedTasks.map(tk=>`<label class="row" style="gap:8px"><input type="checkbox" ${tk.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${tk.id}'); this.closest('label').style.opacity=this.checked?0.5:1"><span>${esc(tk.title)}</span></label>`).join('')}</div>` : ''}
 
-    <div class="field-row">
-      <label class="field">Prioridade<select onchange="App.actions.saveField('${t.id}','priorityManual',this.value)">${PRIORITY_LIST.map(p=>`<option value="${p.key}" ${t.priorityManual===p.key?'selected':''}>${p.emoji} ${p.label}</option>`).join('')}</select></label>
-      <label class="field">Revisão<span class="faint">${t.reviewDueDate? (t.reviewDueDate<todayISO()?`⚠️ atrasada (${fmtDateShort(t.reviewDueDate)})`:`em ${fmtDateShort(t.reviewDueDate)}`) : 'não agendada'}</span></label>
-    </div>
-    <div class="row wrap" style="margin-bottom:10px">${REVIEW_INTERVALS.map(r=>`<button class="btn sm" onclick="App.actions.setReviewDate('${t.id}',${r.days})">${r.label}</button>`).join('')}</div>
+    <button id="td-advanced-toggle" class="btn sm ghost" style="margin-top:14px" onclick="App.actions.toggleTopicAdvanced()">⋯ Mais detalhes</button>
+    <div id="td-advanced" class="hidden" style="margin-top:12px">
+      <div class="field-row">
+        <label class="field">Prioridade<select onchange="App.actions.saveField('${t.id}','priorityManual',this.value)">${PRIORITY_LIST.map(p=>`<option value="${p.key}" ${t.priorityManual===p.key?'selected':''}>${p.emoji} ${p.label}</option>`).join('')}</select></label>
+        <label class="field">Revisão<span class="faint">${t.reviewDueDate? (t.reviewDueDate<todayISO()?`⚠️ atrasada (${fmtDateShort(t.reviewDueDate)})`:`em ${fmtDateShort(t.reviewDueDate)}`) : 'não agendada'}</span></label>
+      </div>
+      <div class="row wrap" style="margin-bottom:10px">${REVIEW_INTERVALS.map(r=>`<button class="btn sm" onclick="App.actions.setReviewDate('${t.id}',${r.days})">${r.label}</button>`).join('')}</div>
 
-    ${scoreInfo && scoreInfo.reasons.length? `<p class="faint">💡 Prioridade sugerida: ${esc(scoreInfo.reasons.join(', '))}.</p>` : ''}
-    ${exam? `<p class="faint">📝 Relacionado a "${esc(exam.title)}" em ${exam.days} dia${exam.days!==1?'s':''}.</p>`:''}
+      ${scoreInfo && scoreInfo.reasons.length? `<p class="faint">💡 Prioridade sugerida: ${esc(scoreInfo.reasons.join(', '))}.</p>` : ''}
+      ${exam? `<p class="faint">📝 Relacionado a "${esc(exam.title)}" em ${exam.days} dia${exam.days!==1?'s':''}.</p>`:''}
 
-    <label class="field">Pré-requisitos<select multiple id="td-prereq" size="3" onchange="App.actions.setPrereqs('${t.id}',this)">${otherTopics.map(o=>`<option value="${o.id}" ${(t.prerequisiteIds||[]).includes(o.id)?'selected':''}>${esc(o.name)}</option>`).join('')}</select></label>
+      <label class="field">Depois... (opcional)<textarea id="td-then" onchange="App.actions.saveField('${t.id}','thenStep',this.value)">${esc(t.thenStep)}</textarea></label>
+      <label class="field">Confiança atual<div class="faint">${t.confidence? (CONF_LIST.find(c=>c.key===t.confidence)||{}).emoji + ' ' + (CONF_LIST.find(c=>c.key===t.confidence)||{}).label : 'ainda não registrada'}</div></label>
+      <label class="field">Pré-requisitos<select multiple id="td-prereq" size="3" onchange="App.actions.setPrereqs('${t.id}',this)">${otherTopics.map(o=>`<option value="${o.id}" ${(t.prerequisiteIds||[]).includes(o.id)?'selected':''}>${esc(o.name)}</option>`).join('')}</select></label>
 
-    <hr class="divider">
-    <h4>↔️ Antes × Depois</h4>
-    <div class="tl">${history.length? history.map(h=>`<div class="tl-item"><div class="tl-date">${fmtDateFull(h.date)}</div><div>${STATUS[h.statusBefore].emoji} → ${STATUS[h.statusAfter].emoji}${h.note?` — "${esc(h.note)}"`:''}</div></div>`).join('') : '<p class="muted">Sem histórico ainda.</p>'}</div>
+      <hr class="divider">
+      <h4>↔️ Antes × Depois</h4>
+      <div class="tl">${history.length? history.map(h=>`<div class="tl-item"><div class="tl-date">${fmtDateFull(h.date)}</div><div>${STATUS[h.statusBefore].emoji} → ${STATUS[h.statusAfter].emoji}${h.note?` — "${esc(h.note)}"`:''}</div></div>`).join('') : '<p class="muted">Sem histórico ainda.</p>'}</div>
 
-    <hr class="divider">
-    <label class="field">Descobri uma dificuldade de base<textarea id="td-gap" placeholder="Ex: percebi que tenho dificuldade em trigonometria"></textarea></label>
-    <button class="btn sm" onclick="App.actions.logGap('${t.id}')">Registrar</button>
+      <hr class="divider">
+      <label class="field">Descobri uma dificuldade de base<textarea id="td-gap" placeholder="Ex: percebi que tenho dificuldade em trigonometria"></textarea></label>
+      <button class="btn sm" onclick="App.actions.logGap('${t.id}')">Registrar</button>
 
-    <hr class="divider">
-    <div class="row wrap">
-      <button class="btn sm" onclick="App.actions.startSession('${t.id}')">✓ Terminei de estudar</button>
-      <button class="btn sm" onclick="App.actions.openTopicForm(null,'${t.subjectId}','${t.id}')">+ Adicionar subassunto</button>
-      <button class="btn sm primary" onclick="App.actions.confirmComplete('${t.id}')">✓ Marcar como concluído</button>
-      <button class="btn sm danger" onclick="App.actions.deleteTopic('${t.id}')">Excluir</button>
+      <hr class="divider">
+      <div class="row wrap">
+        <button class="btn sm" onclick="App.actions.startSession('${t.id}')">✓ Terminei de estudar</button>
+        <button class="btn sm" onclick="App.actions.openTopicForm(null,'${t.subjectId}','${t.id}')">+ Adicionar subassunto</button>
+        <button class="btn sm primary" onclick="App.actions.confirmComplete('${t.id}')">✓ Marcar como concluído</button>
+        <button class="btn sm danger" onclick="App.actions.deleteTopic('${t.id}')">Excluir</button>
+      </div>
     </div>`;
-    openModal('Detalhes do assunto', body);
+    openModal('Assunto', body);
   },
+  pickTopicStatus(btn, key){
+    btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('sel'));
+    btn.classList.add('sel');
+    const hidden = $('#td-status-pick'); if(hidden) hidden.value = key;
+  },
+  toggleTopicAdvanced(){
+    const el = $('#td-advanced'); if(!el) return;
+    el.classList.toggle('hidden');
+    const btn = $('#td-advanced-toggle');
+    if(btn) btn.textContent = el.classList.contains('hidden') ? '⋯ Mais detalhes' : '⋯ Ocultar detalhes';
+  },
+  saveTopicQuick(id){
+    const t = topicOf(id); if(!t) return;
+    const picked = ($('#td-status-pick')||{}).value || t.status;
+    const nextStep = ($('#td-next')||{}).value || '';
+    if(picked !== t.status){
+      t.history = t.history||[];
+      t.history.push({date:todayISO(), statusBefore:t.status, statusAfter:picked, confidence:t.confidence, note:'', minutes:0});
+      t.status = picked;
+    }
+    t.nextStep = nextStep.trim();
+    Store.save('topics', id, t);
+    closeModal(); render();
+    toastMsg('Salvo!');
+  },
+
   renameTopic(id){
     const t=topicOf(id); const name = prompt('Novo nome do assunto:', t.name);
     if(name && name.trim()){ t.name=name.trim(); Store.save('topics',id,t); closeModal(); render(); }
@@ -1196,22 +1371,6 @@ const actions = {
   },
   setCustomReview(id){ const v=$('#rev-custom').value; if(!v) return; const t=topicOf(id); t.reviewDueDate=v; Store.save('topics',id,t); closeModal(); render(); },
 
-  beginStatusChange(id, newStatus){
-    const t = topicOf(id);
-    if(newStatus === t.status){
-      $('#td-status-update').innerHTML = '';
-      return;
-    }
-    $('#td-status-update').innerHTML = `
-      <div class="card" style="margin-bottom:12px; background:var(--paper-sunken)">
-        <p class="faint">Atualizar de ${STATUS[t.status].emoji} para ${STATUS[newStatus].emoji} ${STATUS[newStatus].label}</p>
-        <label class="field">Como você se sente sobre esse assunto agora?
-          <div class="emoji-pick" id="sc-conf">${CONF_LIST.map((c,i)=>`<button type="button" data-v="${c.key}" class="${i===2?'sel':''}" onclick="App.actions.pickEmoji('sc-conf',this)">${c.emoji}</button>`).join('')}</div>
-        </label>
-        <label class="field">Observação (opcional)<textarea id="sc-note" placeholder="O que mudou?"></textarea></label>
-        <button class="btn primary sm" onclick="App.actions.applyStatus('${t.id}','${newStatus}',false)">Salvar</button>
-      </div>`;
-  },
   applyStatus(id, newStatus, fromSuggestion){
     const t = topicOf(id);
     const confidence = fromSuggestion? t.confidence : (this.pickedValue('sc-conf')||null);
@@ -1437,13 +1596,100 @@ const actions = {
   toggleGoalDone(id, val){ const g=State.goals.find(x=>x.id===id); g.completed=val; Store.save('goals',id,g); render(); },
   deleteGoal(id){ State.goals=State.goals.filter(g=>g.id!==id); Store.remove('goals',id); render(); },
 
-  openExamForm(){
+  openTaskForm(id, prefillDate, prefillCategory, prefillStatus){
+    const t = id? taskById(id) : null;
+    const subjOpts = `<option value="">Nenhuma</option>` + State.subjects.map(s=>`<option value="${s.id}" ${t&&t.subjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+    const curCategory = t? t.category : (prefillCategory||'');
+    const curStatus = t? t.status : (prefillStatus||'pendente');
+    openModal(t? 'Editar tarefa' : 'Nova tarefa', `
+      <label class="field">Título<input type="text" id="tk-title" value="${esc(t?t.title:'')}" placeholder="Ex: Entender Estática"></label>
+      <div class="field-row">
+        <label class="field">Data<input type="date" id="tk-date" value="${t?(t.dueDate||''):(prefillDate||'')}"></label>
+        <label class="field">Prioridade<select id="tk-priority">${PRIORITY_LIST.map(p=>`<option value="${p.key}" ${(t?t.priority:'media')===p.key?'selected':''}>${p.emoji} ${p.label}</option>`).join('')}</select></label>
+      </div>
+      <div class="field-row">
+        <label class="field">Categoria<select id="tk-category"><option value="">Nenhuma</option>${TASK_CATEGORY_LIST.map(c=>`<option value="${c.key}" ${curCategory===c.key?'selected':''}>${c.emoji} ${c.label}</option>`).join('')}</select></label>
+        <label class="field">Coluna<select id="tk-status">${TASK_STATUS_LIST.map(s=>`<option value="${s.key}" ${curStatus===s.key?'selected':''}>${s.label}</option>`).join('')}</select></label>
+      </div>
+      <label class="field">Matéria (opcional)<select id="tk-subject" onchange="App.actions.refreshTaskTopics()">${subjOpts}</select></label>
+      <label class="field">Assunto (opcional)<select id="tk-topic"><option value="">Nenhum</option></select></label>
+      <label class="field">Descrição (opcional)<textarea id="tk-desc" placeholder="Opcional">${esc(t?(t.description||''):'')}</textarea></label>
+    `, `<button class="btn" onclick="App.actions.closeModal()">Cancelar</button>
+        ${t?`<button class="btn danger" onclick="App.actions.deleteTask('${t.id}')">Excluir</button>`:''}
+        <button class="btn primary" onclick="App.actions.saveTaskForm(${t?`'${t.id}'`:'null'})">${t?'Salvar':'Criar tarefa'}</button>`);
+    this.refreshTaskTopics(t?t.topicId:null);
+  },
+  refreshTaskTopics(selectedTopicId){
+    const sid = $('#tk-subject').value;
+    const sel = $('#tk-topic');
+    if(!sid){ sel.innerHTML = `<option value="">Nenhum</option>`; return; }
+    sel.innerHTML = `<option value="">Nenhum</option>` + subjectTopics(sid).map(t=>`<option value="${t.id}" ${selectedTopicId===t.id?'selected':''}>${esc(t.name)}</option>`).join('');
+  },
+  async saveTaskForm(id){
+    const title = $('#tk-title').value.trim();
+    if(!title){ toastMsg('Dá um título pra tarefa.'); return; }
+    const existing = id? taskById(id) : null;
+    const newStatus = ($('#tk-status')||{}).value || (existing?existing.status:'pendente');
+    const task = {
+      id: id || uid(),
+      title, description: $('#tk-desc').value.trim(),
+      dueDate: $('#tk-date').value || null,
+      priority: $('#tk-priority').value,
+      category: $('#tk-category').value || null,
+      subjectId: $('#tk-subject').value || null,
+      topicId: $('#tk-topic').value || null,
+      status: newStatus,
+      createdAt: existing? existing.createdAt : todayISO(),
+      completedAt: newStatus==='concluida' ? ((existing&&existing.completedAt)||todayISO()) : null,
+    };
+    if(id){ const i=State.tasks.findIndex(x=>x.id===id); if(i>=0) State.tasks[i]=task; }
+    else State.tasks.push(task);
+    closeModal(); render();
+    toastMsg(id? 'Tarefa atualizada!' : 'Tarefa criada!');
+    await Store.save('tasks', task.id, task);
+  },
+  toggleTaskDone(id){
+    const t = taskById(id); if(!t) return;
+    t.status = t.status==='concluida' ? 'pendente' : 'concluida';
+    t.completedAt = t.status==='concluida' ? todayISO() : null;
+    render();
+    Store.save('tasks', id, t);
+  },
+  icDragStart(ev, id){
+    ev.dataTransfer.setData('text/plain', id);
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.target.classList.add('dragging');
+  },
+  icDragEnd(ev){ ev.target.classList.remove('dragging'); },
+  icDrop(ev, columnKey){
+    ev.preventDefault();
+    const id = ev.dataTransfer.getData('text/plain');
+    const t = taskById(id); if(!t || t.status===columnKey) return;
+    t.status = columnKey;
+    t.completedAt = columnKey==='concluida' ? todayISO() : null;
+    render();
+    Store.save('tasks', id, t);
+  },
+  toggleTaskHome(id){
+    const t = taskById(id); if(!t) return;
+    if(t.dueDate){ t.dueDate = null; toastMsg('Tarefa removida da Home.'); }
+    else { t.dueDate = todayISO(); toastMsg('Enviada pra Home!'); }
+    render();
+    Store.save('tasks', id, t);
+  },
+  deleteTask(id){
+    State.tasks = State.tasks.filter(t=>t.id!==id);
+    Store.remove('tasks', id);
+    closeModal(); render();
+  },
+
+  openExamForm(prefillDate){
     const subjOpts = State.subjects.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
     openModal('Nova prova/entrega', `
       <label class="field">Título<input type="text" id="ne-title" placeholder="Ex: Prova de Cálculo 1"></label>
       <label class="field">Tipo<select id="ne-type">${EXAM_TYPES.map(t=>`<option value="${t.key}">${t.emoji} ${t.label}</option>`).join('')}</select></label>
       <label class="field">Matéria<select id="ne-subject" onchange="App.actions.refreshExamTopics()">${subjOpts}</select></label>
-      <label class="field">Data<input type="date" id="ne-date"></label>
+      <label class="field">Data<input type="date" id="ne-date" value="${esc(prefillDate||'')}"></label>
       <label class="field">Conteúdos vinculados<select multiple id="ne-topics" size="4"></select></label>
     `, `<button class="btn" onclick="App.actions.closeModal()">Cancelar</button>
         <button class="btn primary" onclick="App.actions.saveExam()">Salvar</button>`);
