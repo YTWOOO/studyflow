@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=15';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=16';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 
 /* ============================================================
    CONSTANTS
@@ -504,6 +504,16 @@ function viewHome(){
   const pct = totalToday? Math.round(doneToday/totalToday*100) : 0;
 
   let html = `<div class="page-head"><div><h2>Home</h2><p class="muted">${esc(fmtDateLong(today))}</p></div></div>`;
+
+  const upcomingExams = [...State.exams].filter(e=>e.date>=today).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,3);
+  if(upcomingExams.length){
+    html += `<div class="row wrap" style="gap:8px; margin-bottom:18px">` + upcomingExams.map(e=>{
+      const type = EXAM_TYPES.find(x=>x.key===e.type)||EXAM_TYPES[0];
+      const days = daysBetween(today, e.date);
+      const when = days===0?'hoje':days===1?'amanhã':`em ${days} dias`;
+      return `<span class="chip" style="background:var(--paper-sunken); color:var(--ink-soft); cursor:pointer" onclick="App.actions.goRoute('calendario')">${type.emoji} ${esc(e.title)} · ${when}</span>`;
+    }).join('') + `</div>`;
+  }
 
   if(recov){
     html += `<div class="banner"><span class="x">⚠️</span><div style="flex:1">
