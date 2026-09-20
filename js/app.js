@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=17';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=22';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v22';
 
 /* ============================================================
    CONSTANTS

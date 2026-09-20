@@ -94,3 +94,16 @@ e recomeçar do zero.
 
 Em **Configurações → Exportar backup (.json)** você baixa todos os seus dados
 em um arquivo JSON a qualquer momento.
+
+## Instalar como app (PWA)
+
+O StudyFlow já vem pronto pra ser instalado como app, tanto no Android quanto
+no desktop (Chrome/Edge/Brave). No celular, abra o site e escolha
+"Instalar app" (ou "Adicionar à tela inicial") no menu do navegador — agora
+deve aparecer como instalação de verdade, não só um atalho. No desktop,
+aparece um ícone de instalação (⊕) na barra de endereço.
+
+Os arquivos `manifest.json`, `sw.js` (service worker) e a pasta `icons/`
+cuidam disso. De propósito, o service worker **não guarda nada em cache** —
+ele só existe pra habilitar a instalação. Isso evita reintroduzir aqueles
+bugs de "versão antiga grudada" que a gente já teve com cache do navegador.
