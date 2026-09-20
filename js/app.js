@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=12';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=13';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v13';
 
 /* ============================================================
    CONSTANTS
@@ -468,7 +468,7 @@ const NAV_ITEMS = [
 const BOTTOM_ITEMS = [
   {key:'home', ic:'🏠', label:'Home'},
   {key:'tarefas', ic:'✅', label:'Tarefas'},
-  {key:'registrar', ic:'➕', label:'Adicionar', fab:true},
+  {key:'ic', ic:'🔬', label:'IC'},
   {key:'materias', ic:'📚', label:'Matérias'},
   {key:'evolucao', ic:'📊', label:'Evolução'},
 ];
@@ -517,7 +517,7 @@ function viewHome(){
   html += todayTasks.length
     ? `<div class="stack" style="margin-bottom:8px">${todayTasks.map(taskRow).join('')}</div>`
     : `<div class="empty card" style="margin-bottom:8px"><p class="faint">Nada pendente pra hoje. 🎉</p></div>`;
-  html += `<button class="btn block sm" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null,'${today}')">➕ Adicionar tarefa</button>`;
+  html += `<button class="btn lg primary block" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null,'${today}')">➕ Adicionar tarefa</button>`;
 
   const priSubjects = [...State.subjects].filter(s=>s.priority==='alta')
     .concat(State.subjects.filter(s=>s.priority!=='alta')).slice(0,4);
@@ -565,7 +565,7 @@ function viewTarefas(){
   else list = State.tasks;
   list = State.tarefasTab==='concluidas' ? sortTasks(list) : sortTasksKanban(list);
 
-  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary sm" onclick="App.actions.openTaskForm()">➕ Nova tarefa</button></div>
+  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary" onclick="App.actions.openTaskForm()">➕ Nova tarefa</button></div>
   <div class="tabs">${tabs.map(t=>`<button class="${State.tarefasTab===t.key?'sel':''}" onclick="App.actions.setTarefasTab('${t.key}')">${t.label}</button>`).join('')}</div>`;
   html += list.length? `<div class="stack">${list.map(taskRow).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
   return html;
@@ -1604,20 +1604,29 @@ const actions = {
     openModal(t? 'Editar tarefa' : 'Nova tarefa', `
       <label class="field">Título<input type="text" id="tk-title" value="${esc(t?t.title:'')}" placeholder="Ex: Entender Estática"></label>
       <div class="field-row">
-        <label class="field">Data<input type="date" id="tk-date" value="${t?(t.dueDate||''):(prefillDate||'')}"></label>
         <label class="field">Prioridade<select id="tk-priority">${PRIORITY_LIST.map(p=>`<option value="${p.key}" ${(t?t.priority:'media')===p.key?'selected':''}>${p.emoji} ${p.label}</option>`).join('')}</select></label>
-      </div>
-      <div class="field-row">
         <label class="field">Categoria<select id="tk-category"><option value="">Nenhuma</option>${TASK_CATEGORY_LIST.map(c=>`<option value="${c.key}" ${curCategory===c.key?'selected':''}>${c.emoji} ${c.label}</option>`).join('')}</select></label>
-        <label class="field">Coluna<select id="tk-status">${TASK_STATUS_LIST.map(s=>`<option value="${s.key}" ${curStatus===s.key?'selected':''}>${s.label}</option>`).join('')}</select></label>
       </div>
-      <label class="field">Matéria (opcional)<select id="tk-subject" onchange="App.actions.refreshTaskTopics()">${subjOpts}</select></label>
-      <label class="field">Assunto (opcional)<select id="tk-topic"><option value="">Nenhum</option></select></label>
-      <label class="field">Descrição (opcional)<textarea id="tk-desc" placeholder="Opcional">${esc(t?(t.description||''):'')}</textarea></label>
+      <button id="tk-advanced-toggle" type="button" class="btn sm ghost" onclick="App.actions.toggleTaskFormAdvanced()">⋯ Mais detalhes</button>
+      <div id="tk-advanced" class="hidden" style="margin-top:12px">
+        <div class="field-row">
+          <label class="field">Data<input type="date" id="tk-date" value="${t?(t.dueDate||''):(prefillDate||'')}"></label>
+          <label class="field">Coluna<select id="tk-status">${TASK_STATUS_LIST.map(s=>`<option value="${s.key}" ${curStatus===s.key?'selected':''}>${s.label}</option>`).join('')}</select></label>
+        </div>
+        <label class="field">Matéria (opcional)<select id="tk-subject" onchange="App.actions.refreshTaskTopics()">${subjOpts}</select></label>
+        <label class="field">Assunto (opcional)<select id="tk-topic"><option value="">Nenhum</option></select></label>
+        <label class="field">Descrição (opcional)<textarea id="tk-desc" placeholder="Opcional">${esc(t?(t.description||''):'')}</textarea></label>
+      </div>
     `, `<button class="btn" onclick="App.actions.closeModal()">Cancelar</button>
         ${t?`<button class="btn danger" onclick="App.actions.deleteTask('${t.id}')">Excluir</button>`:''}
         <button class="btn primary" onclick="App.actions.saveTaskForm(${t?`'${t.id}'`:'null'})">${t?'Salvar':'Criar tarefa'}</button>`);
     this.refreshTaskTopics(t?t.topicId:null);
+  },
+  toggleTaskFormAdvanced(){
+    const el = $('#tk-advanced'); if(!el) return;
+    el.classList.toggle('hidden');
+    const btn = $('#tk-advanced-toggle');
+    if(btn) btn.textContent = el.classList.contains('hidden') ? '⋯ Mais detalhes' : '⋯ Ocultar detalhes';
   },
   refreshTaskTopics(selectedTopicId){
     const sid = $('#tk-subject').value;
