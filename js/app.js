@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=13';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=15';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v13';
+const APP_VERSION = 'v15';
 
 /* ============================================================
    CONSTANTS
@@ -71,7 +71,7 @@ const BADGE_DEFS = [
 
 const TASK_CATEGORY_LIST = [
   {key:'faculdade', emoji:'📚', label:'Faculdade'},
-  {key:'ic', emoji:'🔬', label:'IC'},
+  {key:'ic', emoji:'🔬', label:'Iniciação Científica'},
   {key:'projeto', emoji:'🛠️', label:'Projeto'},
   {key:'pessoal', emoji:'🧍', label:'Pessoal'},
   {key:'outros', emoji:'📦', label:'Outros'},
@@ -460,8 +460,7 @@ const NAV_ITEMS = [
   {key:'home', ic:'🏠', label:'Home'},
   {key:'tarefas', ic:'✅', label:'Tarefas'},
   {key:'materias', ic:'📚', label:'Matérias'},
-  {key:'ic', ic:'🔬', label:'IC'},
-  {key:'calendario', ic:'📅', label:'Calendário'},
+  {key:'ic', ic:'🔬', label:'IC', title:'Iniciação Científica'},
   {key:'evolucao', ic:'📊', label:'Evolução'},
   {key:'config', ic:'⚙️', label:'Configurações'},
 ];
@@ -470,13 +469,22 @@ const BOTTOM_ITEMS = [
   {key:'tarefas', ic:'✅', label:'Tarefas'},
   {key:'ic', ic:'🔬', label:'IC'},
   {key:'materias', ic:'📚', label:'Matérias'},
+  {key:'outros', ic:'⋯', label:'Outros'},
+];
+const OUTROS_ITEMS = [
+  {key:'calendario', ic:'📅', label:'Calendário'},
   {key:'evolucao', ic:'📊', label:'Evolução'},
+  {key:'config', ic:'⚙️', label:'Configurações'},
 ];
 function renderNav(){
   $('#side-nav').innerHTML = NAV_ITEMS.map(n=>`<button class="nav-item ${State.route===n.key?'active':''}" onclick="App.actions.goRoute('${n.key}')"><span class="ic">${n.ic}</span>${n.label}</button>`).join('');
-  $('#bottomnav').innerHTML = BOTTOM_ITEMS.map(n=>`<button class="${State.route===n.key?'active':''} ${n.fab?'fab':''}" onclick="${n.key==='registrar'?"App.actions.openQuickRegister()":`App.actions.goRoute('${n.key}')`}"><span class="ic">${n.ic}</span>${n.label}</button>`).join('');
+  $('#bottomnav').innerHTML = BOTTOM_ITEMS.map(n=>{
+    const isActive = n.key==='outros' ? OUTROS_ITEMS.some(o=>o.key===State.route) : State.route===n.key;
+    const onclick = n.key==='outros' ? 'App.actions.openOutrosMenu()' : `App.actions.goRoute('${n.key}')`;
+    return `<button class="${isActive?'active':''} ${n.fab?'fab':''}" onclick="${onclick}"><span class="ic">${n.ic}</span>${n.label}</button>`;
+  }).join('');
   const cur = NAV_ITEMS.find(n=>n.key===State.route);
-  $('#topbar-title').textContent = cur? cur.label : 'StudyFlow';
+  $('#topbar-title').textContent = cur? (cur.title||cur.label) : 'StudyFlow';
   $('#streak-pill').textContent = `🔥 ${computeStreak()} dia${computeStreak()!==1?'s':''}`;
   $('#theme-label').textContent = State.config.theme==='light'?'Tema claro':State.config.theme==='dark'?'Tema escuro':'Tema automático';
   const verEl = $('#app-version');
@@ -587,7 +595,7 @@ function icTaskCard(t){
 }
 function viewIC(){
   const icTasks = State.tasks.filter(t=>t.category==='ic');
-  let html = `<div class="page-head"><h2>IC</h2></div><p class="faint" style="margin-bottom:12px">Arraste um card e solte em outra coluna pra mudar a etapa.</p>`;
+  let html = `<div class="page-head"><h2>Iniciação Científica</h2></div><p class="faint" style="margin-bottom:12px">Arraste um card e solte em outra coluna pra mudar a etapa.</p>`;
   html += `<div class="kanban">` + TASK_STATUS_LIST.map(col=>{
     const items = icTasks.filter(t=>t.status===col.key);
     return `<div class="kanban-col" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="this.classList.remove('drag-over');App.actions.icDrop(event,'${col.key}')">
@@ -1200,6 +1208,12 @@ const actions = {
   calNav(dir){ const d=parseISO(State.calMonth); d.setMonth(d.getMonth()+dir); State.calMonth=isoDate(d); render(); },
   calSelectDay(d){ State.calSel = State.calSel===d? null : d; render(); },
 
+  openOutrosMenu(){
+    openModal('Outros', `
+      <div class="stack">
+        ${OUTROS_ITEMS.map(o=>`<button class="btn block" onclick="App.actions.closeModal();App.actions.goRoute('${o.key}')">${o.ic} ${o.label}</button>`).join('')}
+      </div>`);
+  },
   openQuickRegister(){
     openModal('O que você quer adicionar?', `
       <div class="stack">

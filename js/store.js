@@ -17,7 +17,7 @@
 // chama Store.getAll(colecao), Store.save(colecao, id, dados) e
 // Store.remove(colecao, id).
 
-import { firebaseConfig as fileFirebaseConfig } from './firebase-config.js?v=13';
+import { firebaseConfig as fileFirebaseConfig } from './firebase-config.js?v=15';
 
 const FIREBASE_SDK_VERSION = '10.13.2';
 const FIREBASE_CONFIG_KEY = 'sf_firebase_config';
