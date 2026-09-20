@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=16';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=17';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 
 /* ============================================================
    CONSTANTS
@@ -461,6 +461,7 @@ const NAV_ITEMS = [
   {key:'tarefas', ic:'✅', label:'Tarefas'},
   {key:'materias', ic:'📚', label:'Matérias'},
   {key:'ic', ic:'🔬', label:'IC', title:'Iniciação Científica'},
+  {key:'calendario', ic:'📅', label:'Calendário'},
   {key:'evolucao', ic:'📊', label:'Evolução'},
   {key:'config', ic:'⚙️', label:'Configurações'},
 ];
