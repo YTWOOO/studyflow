@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=22';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=23';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 
 /* ============================================================
    CONSTANTS
@@ -253,11 +253,13 @@ async function seedIfEmpty(){
   const goal = {id:goalId, type:'tempo', scope:'semanal', title:'Estudar 6 horas esta semana', targetMinutes:360, subjectId:null, topicId:null, fromStatus:null, toStatus:null, createdAt:today, completed:false};
   await Store.save('goals', goalId, goal); State.goals=[goal];
 
-  const t1 = {id:uid(), title:'Fazer exercícios de integrais', description:'', dueDate:today, priority:'alta', status:'pendente', category:'faculdade', subjectId:calc, topicId:tInteg, createdAt:today, completedAt:null};
-  const t2 = {id:uid(), title:'Consertar peça 3D da IC', description:'', dueDate:today, priority:'alta', status:'pendente', category:'ic', subjectId:null, topicId:null, createdAt:today, completedAt:null};
-  const t3 = {id:uid(), title:'Revisar lista de exercícios', description:'', dueDate:addDays(today,1), priority:'media', status:'pendente', category:'faculdade', subjectId:null, topicId:null, createdAt:today, completedAt:null};
-  for(const t of [t1,t2,t3]) await Store.save('tasks', t.id, t);
-  State.tasks = [t1,t2,t3];
+  const t1 = {id:uid(), title:'Fazer exercícios de integrais', description:'', dueDate:today, priority:'alta', status:'pendente', category:'faculdade', subjectId:calc, topicId:tInteg, createdAt:today, completedAt:null, parentTaskId:null, order:0};
+  const t2 = {id:uid(), title:'Consertar peça 3D da IC', description:'', dueDate:today, priority:'alta', status:'pendente', category:'ic', subjectId:null, topicId:null, createdAt:today, completedAt:null, parentTaskId:null, order:1};
+  const t3 = {id:uid(), title:'Revisar lista de exercícios', description:'', dueDate:addDays(today,1), priority:'media', status:'pendente', category:'faculdade', subjectId:null, topicId:null, createdAt:today, completedAt:null, parentTaskId:null, order:2};
+  const t1a = {id:uid(), title:'Questões 1 a 5', description:'', dueDate:null, priority:'media', status:'pendente', category:null, subjectId:null, topicId:null, createdAt:today, completedAt:null, parentTaskId:t1.id, order:0};
+  const t1b = {id:uid(), title:'Questões 6 a 10', description:'', dueDate:null, priority:'media', status:'pendente', category:null, subjectId:null, topicId:null, createdAt:today, completedAt:null, parentTaskId:t1.id, order:1};
+  for(const t of [t1,t2,t3,t1a,t1b]) await Store.save('tasks', t.id, t);
+  State.tasks = [t1,t2,t3,t1a,t1b];
 }
 
 /* ============================================================
@@ -375,6 +377,8 @@ function recoveryNeeded(){
    TASKS — derived helpers
    ============================================================ */
 function taskById(id){ return State.tasks.find(t=>t.id===id); }
+function mainTasks(){ return State.tasks.filter(t=>!t.parentTaskId).sort((a,b)=>(a.order||0)-(b.order||0)); }
+function subtasksOf(id){ return State.tasks.filter(t=>t.parentTaskId===id).sort((a,b)=>(a.order||0)-(b.order||0)); }
 function tasksOpen(){ return State.tasks.filter(t=>t.status!=='concluida'); }
 function tasksForDate(date){ return tasksOpen().filter(t=>t.dueDate===date); }
 function tasksOverdue(){ const today=todayISO(); return tasksOpen().filter(t=>t.dueDate && t.dueDate<today); }
@@ -405,6 +409,9 @@ function taskRow(t){
   const subj = t.subjectId ? subjectOf(t.subjectId) : null;
   const topic = t.topicId ? topicOf(t.topicId) : null;
   const overdue = t.dueDate && t.dueDate<todayISO() && t.status!=='concluida';
+  const parent = t.parentTaskId ? taskById(t.parentTaskId) : null;
+  const subs = subtasksOf(t.id);
+  const doneSubs = subs.filter(s=>s.status==='concluida').length;
   return `<div class="task-row ${t.status==='concluida'?'done':''}">
     <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${t.id}')">
     <div class="task-body" onclick="App.actions.openTaskForm('${t.id}')">
@@ -414,6 +421,8 @@ function taskRow(t){
         ${pr? ` · ${pr.emoji} ${pr.label}`:''}
         ${cat? ` · ${cat.emoji} ${cat.label}`:''}
         ${subj? ` · ${esc(subj.name)}`:''}${topic? ` — ${esc(topic.name)}`:''}
+        ${parent? ` · ↳ subtarefa de "${esc(parent.title)}"`:''}
+        ${subs.length? ` · 📋 ${doneSubs}/${subs.length}`:''}
       </div>
     </div>
   </div>`;
@@ -576,18 +585,58 @@ function viewTarefas(){
     {key:'todas', label:'Todas'}, {key:'hoje', label:'Hoje'}, {key:'amanha', label:'Amanhã'},
     {key:'atrasadas', label:'Atrasadas'}, {key:'concluidas', label:'Concluídas'},
   ];
+  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary" onclick="App.actions.openTaskForm()">➕ Nova tarefa</button></div>
+  <div class="tabs">${tabs.map(t=>`<button class="${State.tarefasTab===t.key?'sel':''}" onclick="App.actions.setTarefasTab('${t.key}')">${t.label}</button>`).join('')}</div>`;
+
+  if(State.tarefasTab==='todas'){
+    const roots = mainTasks();
+    html += `<p class="faint" style="margin-bottom:10px">Arraste uma tarefa: solte no meio de outra pra virar subtarefa, ou perto da borda de cima/baixo pra reordenar.</p>`;
+    html += roots.length? `<div class="task-tree">${roots.map(taskTreeItem).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
+    return html;
+  }
+
   let list;
   if(State.tarefasTab==='hoje') list = tasksForDateKeepDone(today);
   else if(State.tarefasTab==='amanha') list = tasksForDateKeepDone(tomorrow);
   else if(State.tarefasTab==='atrasadas') list = tasksOverdueKeepDone();
-  else if(State.tarefasTab==='concluidas') list = State.tasks.filter(t=>t.status==='concluida');
-  else list = State.tasks;
+  else list = State.tasks.filter(t=>t.status==='concluida');
   list = State.tarefasTab==='concluidas' ? sortTasks(list) : sortTasksKanban(list);
-
-  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary" onclick="App.actions.openTaskForm()">➕ Nova tarefa</button></div>
-  <div class="tabs">${tabs.map(t=>`<button class="${State.tarefasTab===t.key?'sel':''}" onclick="App.actions.setTarefasTab('${t.key}')">${t.label}</button>`).join('')}</div>`;
   html += list.length? `<div class="stack">${list.map(taskRow).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
   return html;
+}
+function taskTreeItem(t){
+  const pr = PRIORITY[t.priority]||PRIORITY.media;
+  const cat = TASK_CATEGORY[t.category];
+  const subj = t.subjectId ? subjectOf(t.subjectId) : null;
+  const subs = subtasksOf(t.id);
+  const doneSubs = subs.filter(s=>s.status==='concluida').length;
+  const overdue = t.dueDate && t.dueDate<todayISO() && t.status!=='concluida';
+  return `<div class="task-tree-node">
+    <div class="task-tree-row ${t.status==='concluida'?'done':''}" data-id="${t.id}"
+      draggable="true"
+      ondragstart="App.actions.taskDragStart(event,'${t.id}')"
+      ondragend="App.actions.taskDragEnd(event)"
+      ondragover="App.actions.taskDragOver(event,'${t.id}')"
+      ondragleave="App.actions.taskDragLeave(event)"
+      ondrop="App.actions.taskDrop(event,'${t.id}')">
+      <span class="drag-handle">⠿</span>
+      <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${t.id}')">
+      <div class="task-body" onclick="App.actions.openTaskForm('${t.id}')">
+        <div class="task-title">${esc(t.title)}</div>
+        <div class="task-meta faint">
+          <span class="${overdue?'task-overdue':''}">${taskDueLabel(t)}</span>
+          ${pr? ` · ${pr.emoji} ${pr.label}`:''}
+          ${cat? ` · ${cat.emoji} ${cat.label}`:''}
+          ${subj? ` · ${esc(subj.name)}`:''}
+          ${subs.length? ` · 📋 ${doneSubs}/${subs.length}`:''}
+        </div>
+      </div>
+      ${t.parentTaskId
+        ? `<button class="icon-btn" title="Tornar tarefa principal" onclick="event.stopPropagation();App.actions.promoteSubtask('${t.id}')">⬆️</button>`
+        : `<button class="icon-btn" title="Adicionar subtarefa" onclick="event.stopPropagation();App.actions.openTaskForm(null,null,null,null,'${t.id}')">➕</button>`}
+    </div>
+    ${subs.length? `<div class="task-tree-children">${subs.map(taskTreeItem).join('')}</div>` : ''}
+  </div>`;
 }
 
 /* ============================================================
@@ -1621,11 +1670,13 @@ const actions = {
   toggleGoalDone(id, val){ const g=State.goals.find(x=>x.id===id); g.completed=val; Store.save('goals',id,g); render(); },
   deleteGoal(id){ State.goals=State.goals.filter(g=>g.id!==id); Store.remove('goals',id); render(); },
 
-  openTaskForm(id, prefillDate, prefillCategory, prefillStatus){
+  openTaskForm(id, prefillDate, prefillCategory, prefillStatus, prefillParentId){
     const t = id? taskById(id) : null;
     const subjOpts = `<option value="">Nenhuma</option>` + State.subjects.map(s=>`<option value="${s.id}" ${t&&t.subjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
     const curCategory = t? t.category : (prefillCategory||'');
     const curStatus = t? t.status : (prefillStatus||'pendente');
+    const curParent = t? (t.parentTaskId||'') : (prefillParentId||'');
+    const parentOpts = `<option value="">Nenhuma (tarefa principal)</option>` + mainTasks().filter(m=>m.id!==id).map(m=>`<option value="${m.id}" ${curParent===m.id?'selected':''}>${esc(m.title)}</option>`).join('');
     openModal(t? 'Editar tarefa' : 'Nova tarefa', `
       <label class="field">Título<input type="text" id="tk-title" value="${esc(t?t.title:'')}" placeholder="Ex: Entender Estática"></label>
       <div class="field-row">
@@ -1638,6 +1689,7 @@ const actions = {
           <label class="field">Data<input type="date" id="tk-date" value="${t?(t.dueDate||''):(prefillDate||'')}"></label>
           <label class="field">Coluna<select id="tk-status">${TASK_STATUS_LIST.map(s=>`<option value="${s.key}" ${curStatus===s.key?'selected':''}>${s.label}</option>`).join('')}</select></label>
         </div>
+        <label class="field">Tarefa principal (opcional)<select id="tk-parent">${parentOpts}</select></label>
         <label class="field">Matéria (opcional)<select id="tk-subject" onchange="App.actions.refreshTaskTopics()">${subjOpts}</select></label>
         <label class="field">Assunto (opcional)<select id="tk-topic"><option value="">Nenhum</option></select></label>
         <label class="field">Descrição (opcional)<textarea id="tk-desc" placeholder="Opcional">${esc(t?(t.description||''):'')}</textarea></label>
@@ -1664,6 +1716,11 @@ const actions = {
     if(!title){ toastMsg('Dá um título pra tarefa.'); return; }
     const existing = id? taskById(id) : null;
     const newStatus = ($('#tk-status')||{}).value || (existing?existing.status:'pendente');
+    const newParent = (($('#tk-parent')||{}).value) || null;
+    const parentChanged = !existing || existing.parentTaskId !== newParent;
+    const order = parentChanged
+      ? (newParent ? subtasksOf(newParent).length : mainTasks().length)
+      : existing.order;
     const task = {
       id: id || uid(),
       title, description: $('#tk-desc').value.trim(),
@@ -1673,6 +1730,8 @@ const actions = {
       subjectId: $('#tk-subject').value || null,
       topicId: $('#tk-topic').value || null,
       status: newStatus,
+      parentTaskId: newParent,
+      order,
       createdAt: existing? existing.createdAt : todayISO(),
       completedAt: newStatus==='concluida' ? ((existing&&existing.completedAt)||todayISO()) : null,
     };
@@ -1688,6 +1747,65 @@ const actions = {
     t.completedAt = t.status==='concluida' ? todayISO() : null;
     render();
     Store.save('tasks', id, t);
+  },
+  promoteSubtask(id){
+    const t = taskById(id); if(!t || !t.parentTaskId) return;
+    t.parentTaskId = null;
+    t.order = mainTasks().length;
+    render();
+    toastMsg('Virou tarefa principal!');
+    Store.save('tasks', id, t);
+  },
+  taskDragStart(ev, id){
+    ev.dataTransfer.setData('text/plain', id);
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.currentTarget.classList.add('task-dragging');
+  },
+  taskDragEnd(ev){ ev.currentTarget.classList.remove('task-dragging'); },
+  taskDragOver(ev, targetId){
+    ev.preventDefault();
+    const row = ev.currentTarget;
+    const rect = row.getBoundingClientRect();
+    const y = ev.clientY - rect.top;
+    row.classList.remove('drop-before','drop-after','drop-nest');
+    let zone;
+    if(y < rect.height*0.28){ zone='before'; row.classList.add('drop-before'); }
+    else if(y > rect.height*0.72){ zone='after'; row.classList.add('drop-after'); }
+    else { zone='nest'; row.classList.add('drop-nest'); }
+    row.dataset.dropZone = zone;
+  },
+  taskDragLeave(ev){ ev.currentTarget.classList.remove('drop-before','drop-after','drop-nest'); },
+  taskDrop(ev, targetId){
+    ev.preventDefault();
+    const row = ev.currentTarget;
+    const zone = row.dataset.dropZone || 'after';
+    row.classList.remove('drop-before','drop-after','drop-nest');
+    const draggedId = ev.dataTransfer.getData('text/plain');
+    if(!draggedId || draggedId===targetId) return;
+    const dragged = taskById(draggedId), target = taskById(targetId);
+    if(!dragged || !target) return;
+
+    if(zone==='nest'){
+      if(target.parentTaskId){ toastMsg('Só dá pra colocar dentro de uma tarefa principal (não de uma subtarefa).'); return; }
+      if(subtasksOf(dragged.id).length){ toastMsg('Essa tarefa já tem subtarefas — não dá pra aninhar mais um nível.'); return; }
+      dragged.parentTaskId = target.id;
+      const sibs = subtasksOf(target.id).filter(s=>s.id!==dragged.id);
+      dragged.order = sibs.length;
+      render();
+      toastMsg(`Virou subtarefa de "${target.title}"`);
+      Store.save('tasks', dragged.id, dragged);
+      return;
+    }
+
+    const newParent = target.parentTaskId || null;
+    dragged.parentTaskId = newParent;
+    let sibs = (newParent? subtasksOf(newParent) : mainTasks()).filter(s=>s.id!==dragged.id);
+    const targetIdx = sibs.findIndex(s=>s.id===target.id);
+    const insertAt = zone==='before'? targetIdx : targetIdx+1;
+    sibs.splice(insertAt, 0, dragged);
+    sibs.forEach((s,i)=>{ s.order=i; });
+    render();
+    sibs.forEach(s => Store.save('tasks', s.id, s));
   },
   icDragStart(ev, id){
     ev.dataTransfer.setData('text/plain', id);
@@ -1712,6 +1830,11 @@ const actions = {
     Store.save('tasks', id, t);
   },
   deleteTask(id){
+    const orphaned = subtasksOf(id);
+    if(orphaned.length){
+      let base = mainTasks().length;
+      orphaned.forEach((s,i)=>{ s.parentTaskId = null; s.order = base+i; Store.save('tasks', s.id, s); });
+    }
     State.tasks = State.tasks.filter(t=>t.id!==id);
     Store.remove('tasks', id);
     closeModal(); render();
