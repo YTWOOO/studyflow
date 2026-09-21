@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=23';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=24';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v23';
+const APP_VERSION = 'v24';
 
 /* ============================================================
    CONSTANTS
@@ -117,7 +117,7 @@ const State = {
   subjects:[], topics:[], sessions:[], exams:[], goals:[], journal:[], semesters:[], tasks:[],
   config:{activeSemesterId:null, streak:{count:0,lastDate:null}, badges:[], theme:'auto', planning:{}},
   selSubjectId:null, mapExpanded:{}, calMonth:null, calSel:null, calTab:'mes', metasTab:'semanal', revTab:'revisar',
-  diarioDate:null, showFirebaseForm:false, evoTab:'geral', tarefasTab:'hoje',
+  diarioDate:null, showFirebaseForm:false, evoTab:'geral', tarefasTab:'hoje', taskExpanded:{},
 };
 
 async function loadAll(){
@@ -386,8 +386,8 @@ function tasksOverdue(){ const today=todayISO(); return tasksOpen().filter(t=>t.
 // keeps it visible (struck through) instead of yanking it out of the list;
 // it naturally drops off the next day.
 function taskStillRelevantToday(t){ const today=todayISO(); return t.status!=='concluida' || t.completedAt===today; }
-function tasksForDateKeepDone(date){ return State.tasks.filter(t=>t.dueDate===date && taskStillRelevantToday(t)); }
-function tasksOverdueKeepDone(){ const today=todayISO(); return State.tasks.filter(t=>t.dueDate && t.dueDate<today && taskStillRelevantToday(t)); }
+function tasksForDateKeepDone(date){ return State.tasks.filter(t=>!t.parentTaskId && t.dueDate===date && taskStillRelevantToday(t)); }
+function tasksOverdueKeepDone(){ const today=todayISO(); return State.tasks.filter(t=>!t.parentTaskId && t.dueDate && t.dueDate<today && taskStillRelevantToday(t)); }
 function sortTasksKanban(list){
   const open = sortTasks(list.filter(t=>t.status!=='concluida'));
   const done = list.filter(t=>t.status==='concluida').sort((a,b)=>(b.completedAt||'').localeCompare(a.completedAt||''));
@@ -426,6 +426,22 @@ function taskRow(t){
       </div>
     </div>
   </div>`;
+}
+// Wraps taskRow with a minimalist expand/collapse arrow whenever the task has
+// subtasks — used anywhere a flat list of MAIN tasks is shown (Home, and the
+// date-based Tarefas tabs), so subtasks stay tucked away until asked for.
+function taskRowWithSubtasks(t){
+  const subs = subtasksOf(t.id);
+  const hasSubs = subs.length>0;
+  const expanded = !!State.taskExpanded[t.id];
+  let html = `<div class="task-row-group">
+    ${hasSubs? `<button class="task-toggle" onclick="App.actions.toggleTaskExpand('${t.id}')">${expanded?'▾':'▸'}</button>` : `<span class="task-toggle-spacer"></span>`}
+    ${taskRow(t)}
+  </div>`;
+  if(hasSubs && expanded){
+    html += `<div class="task-subtasks-inline">${subs.map(taskRow).join('')}</div>`;
+  }
+  return html;
 }
 
 /* ============================================================
@@ -543,9 +559,9 @@ function viewHome(){
 
   html += `<div class="row between" style="margin-bottom:10px"><h3>📌 Para fazer</h3></div>`;
   html += todayTasks.length
-    ? `<div class="stack" style="margin-bottom:8px">${todayTasks.map(taskRow).join('')}</div>`
+    ? `<div class="stack" style="margin-bottom:8px">${todayTasks.map(taskRowWithSubtasks).join('')}</div>`
     : `<div class="empty card" style="margin-bottom:8px"><p class="faint">Nada pendente pra hoje. 🎉</p></div>`;
-  html += `<button class="btn lg primary block" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null,'${today}')">➕ Adicionar tarefa</button>`;
+  html += `<button class="btn lg primary block" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null)">➕ Adicionar tarefa</button>`;
 
   const priSubjects = [...State.subjects].filter(s=>s.priority==='alta')
     .concat(State.subjects.filter(s=>s.priority!=='alta')).slice(0,4);
@@ -601,7 +617,7 @@ function viewTarefas(){
   else if(State.tarefasTab==='atrasadas') list = tasksOverdueKeepDone();
   else list = State.tasks.filter(t=>t.status==='concluida');
   list = State.tarefasTab==='concluidas' ? sortTasks(list) : sortTasksKanban(list);
-  html += list.length? `<div class="stack">${list.map(taskRow).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
+  html += list.length? `<div class="stack">${list.map(taskRowWithSubtasks).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
   return html;
 }
 function taskTreeItem(t){
@@ -609,33 +625,38 @@ function taskTreeItem(t){
   const cat = TASK_CATEGORY[t.category];
   const subj = t.subjectId ? subjectOf(t.subjectId) : null;
   const subs = subtasksOf(t.id);
+  const hasSubs = subs.length>0;
+  const expanded = !!State.taskExpanded[t.id];
   const doneSubs = subs.filter(s=>s.status==='concluida').length;
   const overdue = t.dueDate && t.dueDate<todayISO() && t.status!=='concluida';
   return `<div class="task-tree-node">
-    <div class="task-tree-row ${t.status==='concluida'?'done':''}" data-id="${t.id}"
-      draggable="true"
-      ondragstart="App.actions.taskDragStart(event,'${t.id}')"
-      ondragend="App.actions.taskDragEnd(event)"
-      ondragover="App.actions.taskDragOver(event,'${t.id}')"
-      ondragleave="App.actions.taskDragLeave(event)"
-      ondrop="App.actions.taskDrop(event,'${t.id}')">
-      <span class="drag-handle">⠿</span>
-      <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${t.id}')">
-      <div class="task-body" onclick="App.actions.openTaskForm('${t.id}')">
-        <div class="task-title">${esc(t.title)}</div>
-        <div class="task-meta faint">
-          <span class="${overdue?'task-overdue':''}">${taskDueLabel(t)}</span>
-          ${pr? ` · ${pr.emoji} ${pr.label}`:''}
-          ${cat? ` · ${cat.emoji} ${cat.label}`:''}
-          ${subj? ` · ${esc(subj.name)}`:''}
-          ${subs.length? ` · 📋 ${doneSubs}/${subs.length}`:''}
+    <div class="task-row-group">
+      ${hasSubs? `<button class="task-toggle" onclick="App.actions.toggleTaskExpand('${t.id}')">${expanded?'▾':'▸'}</button>` : `<span class="task-toggle-spacer"></span>`}
+      <div class="task-tree-row ${t.status==='concluida'?'done':''}" data-id="${t.id}"
+        draggable="true"
+        ondragstart="App.actions.taskDragStart(event,'${t.id}')"
+        ondragend="App.actions.taskDragEnd(event)"
+        ondragover="App.actions.taskDragOver(event,'${t.id}')"
+        ondragleave="App.actions.taskDragLeave(event)"
+        ondrop="App.actions.taskDrop(event,'${t.id}')">
+        <span class="drag-handle">⠿</span>
+        <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${t.id}')">
+        <div class="task-body" onclick="App.actions.openTaskForm('${t.id}')">
+          <div class="task-title">${esc(t.title)}</div>
+          <div class="task-meta faint">
+            <span class="${overdue?'task-overdue':''}">${taskDueLabel(t)}</span>
+            ${pr? ` · ${pr.emoji} ${pr.label}`:''}
+            ${cat? ` · ${cat.emoji} ${cat.label}`:''}
+            ${subj? ` · ${esc(subj.name)}`:''}
+            ${subs.length? ` · 📋 ${doneSubs}/${subs.length}`:''}
+          </div>
         </div>
+        ${t.parentTaskId
+          ? `<button class="icon-btn" title="Tornar tarefa principal" onclick="event.stopPropagation();App.actions.promoteSubtask('${t.id}')">⬆️</button>`
+          : `<button class="icon-btn" title="Adicionar subtarefa" onclick="event.stopPropagation();App.actions.openTaskForm(null,null,null,null,'${t.id}')">➕</button>`}
       </div>
-      ${t.parentTaskId
-        ? `<button class="icon-btn" title="Tornar tarefa principal" onclick="event.stopPropagation();App.actions.promoteSubtask('${t.id}')">⬆️</button>`
-        : `<button class="icon-btn" title="Adicionar subtarefa" onclick="event.stopPropagation();App.actions.openTaskForm(null,null,null,null,'${t.id}')">➕</button>`}
     </div>
-    ${subs.length? `<div class="task-tree-children">${subs.map(taskTreeItem).join('')}</div>` : ''}
+    ${hasSubs && expanded? `<div class="task-tree-children">${subs.map(taskTreeItem).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -1686,7 +1707,7 @@ const actions = {
       <button id="tk-advanced-toggle" type="button" class="btn sm ghost" onclick="App.actions.toggleTaskFormAdvanced()">⋯ Mais detalhes</button>
       <div id="tk-advanced" class="hidden" style="margin-top:12px">
         <div class="field-row">
-          <label class="field">Data<input type="date" id="tk-date" value="${t?(t.dueDate||''):(prefillDate||'')}"></label>
+          <label class="field">Data<div class="row" style="gap:6px"><input type="date" id="tk-date" value="${t?(t.dueDate||''):(prefillDate||'')}" style="flex:1"><button type="button" class="icon-btn" title="Remover data" onclick="document.getElementById('tk-date').value=''">✕</button></div></label>
           <label class="field">Coluna<select id="tk-status">${TASK_STATUS_LIST.map(s=>`<option value="${s.key}" ${curStatus===s.key?'selected':''}>${s.label}</option>`).join('')}</select></label>
         </div>
         <label class="field">Tarefa principal (opcional)<select id="tk-parent">${parentOpts}</select></label>
@@ -1748,6 +1769,7 @@ const actions = {
     render();
     Store.save('tasks', id, t);
   },
+  toggleTaskExpand(id){ State.taskExpanded[id] = !State.taskExpanded[id]; render(); },
   promoteSubtask(id){
     const t = taskById(id); if(!t || !t.parentTaskId) return;
     t.parentTaskId = null;
