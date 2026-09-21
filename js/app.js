@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=24';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=31';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v24';
+const APP_VERSION = 'v31';
 
 /* ============================================================
    CONSTANTS
@@ -117,7 +117,7 @@ const State = {
   subjects:[], topics:[], sessions:[], exams:[], goals:[], journal:[], semesters:[], tasks:[],
   config:{activeSemesterId:null, streak:{count:0,lastDate:null}, badges:[], theme:'auto', planning:{}},
   selSubjectId:null, mapExpanded:{}, calMonth:null, calSel:null, calTab:'mes', metasTab:'semanal', revTab:'revisar',
-  diarioDate:null, showFirebaseForm:false, evoTab:'geral', tarefasTab:'hoje', taskExpanded:{},
+  diarioDate:null, showFirebaseForm:false, evoTab:'geral', tarefasTab:'hoje', taskExpanded:{}, taskEditing:null, taskMenu:null, openParent:null, _animRows:new Set(),
 };
 
 async function loadAll(){
@@ -386,6 +386,14 @@ function tasksOverdue(){ const today=todayISO(); return tasksOpen().filter(t=>t.
 // keeps it visible (struck through) instead of yanking it out of the list;
 // it naturally drops off the next day.
 function taskStillRelevantToday(t){ const today=todayISO(); return t.status!=='concluida' || t.completedAt===today; }
+// "Tarefa principal" = starred (shows on Home), like the star in Google Tasks.
+// Tasks due today/overdue also count, so dated tasks still surface on Home.
+function onHome(t){ return !!t.home || (!!t.dueDate && t.dueDate<=todayISO()); }
+function sortByOrderDoneLast(list){
+  const byOrder=(a,b)=>(a.order||0)-(b.order||0);
+  return [...list.filter(t=>t.status!=='concluida').sort(byOrder), ...list.filter(t=>t.status==='concluida').sort(byOrder)];
+}
+function saveTask(t){ if(!t || t._new) return; const copy={...t}; delete copy._new; Store.save('tasks', t.id, copy); }
 function tasksForDateKeepDone(date){ return State.tasks.filter(t=>!t.parentTaskId && t.dueDate===date && taskStillRelevantToday(t)); }
 function tasksOverdueKeepDone(){ const today=todayISO(); return State.tasks.filter(t=>!t.parentTaskId && t.dueDate && t.dueDate<today && taskStillRelevantToday(t)); }
 function sortTasksKanban(list){
@@ -524,7 +532,7 @@ function viewHome(){
   const today = todayISO();
   const recov = recoveryNeeded();
 
-  const todayTasks = sortTasksKanban([...tasksForDateKeepDone(today), ...tasksOverdueKeepDone()]);
+  const todayTasks = sortByOrderDoneLast(State.tasks.filter(t=>!t.parentTaskId && onHome(t) && taskStillRelevantToday(t)));
   const doneToday = todayTasks.filter(t=>t.status==='concluida').length;
   const totalToday = todayTasks.length;
   const pct = totalToday? Math.round(doneToday/totalToday*100) : 0;
@@ -557,11 +565,11 @@ function viewHome(){
     <div class="bar" style="margin-bottom:18px"><span style="width:${pct}%"></span></div>`;
   }
 
-  html += `<div class="row between" style="margin-bottom:10px"><h3>📌 Para fazer</h3></div>`;
+  html += `<div class="row between" style="margin-bottom:10px"><h3>⭐ Tarefas principais</h3></div>`;
   html += todayTasks.length
-    ? `<div class="stack" style="margin-bottom:8px">${todayTasks.map(taskRowWithSubtasks).join('')}</div>`
+    ? `<div class="home-tasks" style="margin-bottom:8px">${taskList(todayTasks)}</div>`
     : `<div class="empty card" style="margin-bottom:8px"><p class="faint">Nada pendente pra hoje. 🎉</p></div>`;
-  html += `<button class="btn lg primary block" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null)">➕ Adicionar tarefa</button>`;
+  html += `<button class="btn lg primary block" style="margin-bottom:22px" onclick="App.actions.openTaskForm(null,null,null,null,null,true)">➕ Adicionar tarefa</button>`;
 
   const priSubjects = [...State.subjects].filter(s=>s.priority==='alta')
     .concat(State.subjects.filter(s=>s.priority!=='alta')).slice(0,4);
@@ -601,39 +609,82 @@ function viewTarefas(){
     {key:'todas', label:'Todas'}, {key:'hoje', label:'Hoje'}, {key:'amanha', label:'Amanhã'},
     {key:'atrasadas', label:'Atrasadas'}, {key:'concluidas', label:'Concluídas'},
   ];
-  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary" onclick="App.actions.openTaskForm()">➕ Nova tarefa</button></div>
-  <div class="tabs">${tabs.map(t=>`<button class="${State.tarefasTab===t.key?'sel':''}" onclick="App.actions.setTarefasTab('${t.key}')">${t.label}</button>`).join('')}</div>`;
+  let html = `<div class="page-head"><h2>Tarefas</h2><button class="btn primary" onclick="App.actions.newTaskFromTarefas()">➕ Nova tarefa</button></div>
+  <div class="tabs">${tabs.map(t=>`<button class="${State.tarefasTab===t.key?'sel':''}" onclick="App.actions.setTarefasTab('${t.key}')">${t.label}</button>`).join('')}</div>
+  <p class="faint" style="margin-bottom:10px">Toque numa tarefa pra editar o nome e os detalhes. ☆ marca como tarefa principal (vai pra Home). ⋮ tem subtarefas e mais opções. Arraste pra reordenar.</p>`;
 
-  if(State.tarefasTab==='todas'){
-    const roots = mainTasks();
-    html += `<p class="faint" style="margin-bottom:10px">Arraste uma tarefa: solte no meio de outra pra virar subtarefa, ou perto da borda de cima/baixo pra reordenar.</p>`;
-    html += roots.length? `<div class="task-tree">${roots.map(taskTreeItem).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
-    return html;
-  }
-
+  const mains = State.tasks.filter(t=>!t.parentTaskId);
   let list;
-  if(State.tarefasTab==='hoje') list = tasksForDateKeepDone(today);
-  else if(State.tarefasTab==='amanha') list = tasksForDateKeepDone(tomorrow);
-  else if(State.tarefasTab==='atrasadas') list = tasksOverdueKeepDone();
-  else list = State.tasks.filter(t=>t.status==='concluida');
-  list = State.tarefasTab==='concluidas' ? sortTasks(list) : sortTasksKanban(list);
-  html += list.length? `<div class="stack">${list.map(taskRowWithSubtasks).join('')}</div>` : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
+  if(State.tarefasTab==='hoje') list = mains.filter(t=>onHome(t) && taskStillRelevantToday(t));
+  else if(State.tarefasTab==='amanha') list = mains.filter(t=>t.dueDate===tomorrow && taskStillRelevantToday(t));
+  else if(State.tarefasTab==='atrasadas') list = mains.filter(t=>t.dueDate && t.dueDate<today && taskStillRelevantToday(t));
+  else if(State.tarefasTab==='concluidas') list = mains.filter(t=>t.status==='concluida');
+  else list = mains;
+  list = sortByOrderDoneLast(list);
+  html += list.length? taskList(list) : `<div class="empty card"><p class="faint">Nada por aqui.</p></div>`;
   return html;
 }
-function taskTreeItem(t){
+function taskList(list){
+  return `<div class="task-tree">${list.map((t,i)=>taskItem(t, list[i-1]&&list[i-1].id, list[i+1]&&list[i+1].id)).join('')}</div>`;
+}
+// One renderer for every task list (Home + every Tarefas tab), modeled on
+// Google Tasks: click to edit title/details in place, ⋮ for actions, ☆ to star.
+function taskItem(t, prevId, nextId){
+  const isSub = !!t.parentTaskId;
+  const subs = isSub? [] : sortByOrderDoneLast(subtasksOf(t.id));
+  const hasSubs = subs.length>0;
+  const editing = State.taskEditing===t.id;
+  const menuOpen = State.taskMenu===t.id;
+  const editingTask = State.taskEditing ? taskById(State.taskEditing) : null;
+  const open = !isSub && (editing || (!!editingTask && editingTask.parentTaskId===t.id) || State.openParent===t.id);
   const pr = PRIORITY[t.priority]||PRIORITY.media;
   const cat = TASK_CATEGORY[t.category];
   const subj = t.subjectId ? subjectOf(t.subjectId) : null;
-  const subs = subtasksOf(t.id);
-  const hasSubs = subs.length>0;
-  const expanded = !!State.taskExpanded[t.id];
-  const doneSubs = subs.filter(s=>s.status==='concluida').length;
+  const doneSubs = subs.filter(x=>x.status==='concluida').length;
   const overdue = t.dueDate && t.dueDate<todayISO() && t.status!=='concluida';
+  const starred = onHome(t);
+
+  const meta = [
+    t.dueDate? `<span class="${overdue?'task-overdue':''}">${taskDueLabel(t)}</span>` : '',
+    t.priority && t.priority!=='media'? `${pr.emoji} ${pr.label}` : '',
+    cat? `${cat.emoji} ${cat.label}` : '',
+    subj? esc(subj.name) : '',
+    hasSubs? `📋 ${doneSubs}/${subs.length}` : '',
+    (!editing && t.description)? `📝` : '',
+  ].filter(Boolean).join(' · ');
+
+  const subsBlock = !open? '' : `<div class="task-subs-inline" onclick="event.stopPropagation()">
+      ${subs.map((x,i)=>taskItem(x, subs[i-1]&&subs[i-1].id, subs[i+1]&&subs[i+1].id)).join('')}
+      <button class="task-add-sub" onclick="App.actions.addSubtaskInline('${t.id}')">➕ Adicionar subtarefa</button>
+    </div>`;
+  const body = editing
+    ? `<input class="task-inline-title" id="ti-title-${t.id}" value="${esc(t.title)}" placeholder="Título"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();App.actions.finishInlineEdit();} else if(event.key==='Escape'){App.actions.finishInlineEdit();}">
+       <textarea class="task-inline-desc" id="ti-desc-${t.id}" rows="2" placeholder="Detalhes">${esc(t.description||'')}</textarea>
+       ${subsBlock}
+       <div class="row task-inline-actions" style="gap:6px; margin-top:4px">
+         <button class="btn sm ghost" onclick="App.actions.openFullEdit('${t.id}')">⚙️ Mais opções</button>
+         <button class="btn sm" style="margin-left:auto" onclick="App.actions.finishInlineEdit()">Pronto</button>
+       </div>`
+    : `<div class="task-title">${esc(t.title)||'<span class="faint">(sem título)</span>'}</div>
+       ${meta? `<div class="task-meta faint">${meta}</div>`:''}
+       ${t.description? `<div class="task-desc-preview faint ${open?'full':''}">${esc(t.description)}</div>`:''}
+       ${subsBlock}`;
+
+  const menu = !menuOpen? '' : `<div class="task-menu">
+      ${!isSub? `<button onclick="App.actions.addSubtaskInline('${t.id}')">➕ Adicionar subtarefa</button>`:''}
+      <button onclick="App.actions.openFullEdit('${t.id}')">✏️ Editar tarefa</button>
+      ${!isSub && prevId && !hasSubs? `<button onclick="App.actions.indentTask('${t.id}','${prevId}')">↳ Virar subtarefa da de cima</button>`:''}
+      ${isSub? `<button onclick="App.actions.promoteSubtask('${t.id}')">⬆️ Tornar tarefa principal</button>`:''}
+      ${prevId? `<button onclick="App.actions.placeTask('${t.id}','${prevId}','before')">↑ Mover para cima</button>`:''}
+      ${nextId? `<button onclick="App.actions.placeTask('${t.id}','${nextId}','after')">↓ Mover para baixo</button>`:''}
+      <button class="danger-item" onclick="App.actions.deleteTask('${t.id}')">🗑️ Excluir</button>
+    </div>`;
+
   return `<div class="task-tree-node">
     <div class="task-row-group">
-      ${hasSubs? `<button class="task-toggle" onclick="App.actions.toggleTaskExpand('${t.id}')">${expanded?'▾':'▸'}</button>` : `<span class="task-toggle-spacer"></span>`}
-      <div class="task-tree-row ${t.status==='concluida'?'done':''}" data-id="${t.id}"
-        draggable="true"
+      <div class="task-tree-row ${t.status==='concluida'?'done':''} ${editing?'task-editing':''}" data-id="${t.id}"
+        draggable="${editing?'false':'true'}"
         ondragstart="App.actions.taskDragStart(event,'${t.id}')"
         ondragend="App.actions.taskDragEnd(event)"
         ondragover="App.actions.taskDragOver(event,'${t.id}')"
@@ -641,22 +692,14 @@ function taskTreeItem(t){
         ondrop="App.actions.taskDrop(event,'${t.id}')">
         <span class="drag-handle">⠿</span>
         <input type="checkbox" ${t.status==='concluida'?'checked':''} onchange="App.actions.toggleTaskDone('${t.id}')">
-        <div class="task-body" onclick="App.actions.openTaskForm('${t.id}')">
-          <div class="task-title">${esc(t.title)}</div>
-          <div class="task-meta faint">
-            <span class="${overdue?'task-overdue':''}">${taskDueLabel(t)}</span>
-            ${pr? ` · ${pr.emoji} ${pr.label}`:''}
-            ${cat? ` · ${cat.emoji} ${cat.label}`:''}
-            ${subj? ` · ${esc(subj.name)}`:''}
-            ${subs.length? ` · 📋 ${doneSubs}/${subs.length}`:''}
-          </div>
+        <div class="task-body" ${editing?'':`onclick="App.actions.startInlineEdit('${t.id}')"`}>${body}</div>
+        ${!isSub? `<button class="icon-btn task-star ${starred?'on':''}" title="${starred?'Tirar das tarefas principais':'Marcar como tarefa principal'}" onclick="event.stopPropagation();App.actions.toggleStar('${t.id}')">${starred?'★':'☆'}</button>`:''}
+        <div class="task-menu-wrap">
+          <button class="icon-btn task-menu-btn" title="Opções" onclick="event.stopPropagation();App.actions.toggleTaskMenu('${t.id}')">⋮</button>
+          ${menu}
         </div>
-        ${t.parentTaskId
-          ? `<button class="icon-btn" title="Tornar tarefa principal" onclick="event.stopPropagation();App.actions.promoteSubtask('${t.id}')">⬆️</button>`
-          : `<button class="icon-btn" title="Adicionar subtarefa" onclick="event.stopPropagation();App.actions.openTaskForm(null,null,null,null,'${t.id}')">➕</button>`}
       </div>
     </div>
-    ${hasSubs && expanded? `<div class="task-tree-children">${subs.map(taskTreeItem).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -664,13 +707,13 @@ function taskTreeItem(t){
    VIEW: IC (quadro kanban)
    ============================================================ */
 function icTaskCard(t){
-  const hasDate = !!t.dueDate;
+  const hasDate = onHome(t);
   return `<div class="card ic-card ${t.status==='concluida'?'done':''}" style="margin-bottom:8px"
       draggable="true" ondragstart="App.actions.icDragStart(event,'${t.id}')" ondragend="App.actions.icDragEnd(event)">
     <div class="ic-card-title" onclick="App.actions.openTaskForm('${t.id}')">${esc(t.title)}</div>
     ${hasDate? `<div class="faint" style="font-size:11.5px; margin-top:2px">${taskDueLabel(t)}</div>` : ''}
     <div class="row" style="margin-top:8px">
-      <button class="btn sm ${hasDate?'':'ghost'}" style="margin-left:auto" onclick="App.actions.toggleTaskHome('${t.id}')">${hasDate? '✅ na Home' : '→ Home'}</button>
+      <button class="btn sm ${hasDate?'':'ghost'}" style="margin-left:auto" onclick="App.actions.toggleTaskHome('${t.id}')">${hasDate? '★ na Home' : '☆ → Home'}</button>
     </div>
   </div>`;
 }
@@ -1167,6 +1210,34 @@ function firebaseErrorBanner(){
     </div>
   </div>`;
 }
+// Google-Tasks-style open/close: the row smoothly grows/shrinks to its new
+// height, and the details field + buttons fade in when it opens.
+function animateTaskRows(prev){
+  const ids = State._animRows; State._animRows = new Set();
+  if(!ids.size) return;
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
+  ids.forEach(id=>{
+    const row = document.querySelector(`#app .task-tree-row[data-id="${id}"]`);
+    if(!row || !row.animate) return;
+    const to = row.getBoundingClientRect().height;
+    const appearing = prev[id]==null;
+    const from = appearing ? 0 : prev[id];
+    if(!appearing && Math.abs(to-from)<2) return;
+    row.style.overflow = 'hidden';
+    const frames = appearing
+      ? [{height:'0px', opacity:0}, {height:to+'px', opacity:1}]
+      : [{height:from+'px'}, {height:to+'px'}];
+    const a = row.animate(frames, {duration:240, easing:EASE});
+    a.onfinish = a.oncancel = ()=>{ row.style.overflow=''; };
+    if(row.classList.contains('task-editing')){
+      row.querySelectorAll(':scope > .task-body > .task-inline-desc, :scope > .task-body > .task-inline-actions, :scope > .task-body > .task-subs-inline').forEach(el=>{
+        el.animate([{opacity:0, transform:'translateY(-6px)'}, {opacity:1, transform:'none'}],
+          {duration:220, delay:60, easing:'ease-out', fill:'backwards'});
+      });
+    }
+  });
+}
 function render(){
   renderNav();
   const map = {
@@ -1174,7 +1245,28 @@ function render(){
     calendario:viewCalendario, evolucao:viewEvolucao, config:viewConfig,
   };
   const fn = map[State.route] || viewHome;
+  if(State.taskEditing){
+    const et = taskById(State.taskEditing);
+    const ti = document.getElementById('ti-title-'+State.taskEditing), td = document.getElementById('ti-desc-'+State.taskEditing);
+    if(et && ti) et.title = ti.value;
+    if(et && td) et.description = td.value;
+  }
+  const active = document.activeElement && document.activeElement.id;
+  const prevHeights = {};
+  if(State._animRows.size){
+    document.querySelectorAll('#app .task-tree-row[data-id]').forEach(r=>{
+      if(State._animRows.has(r.dataset.id)) prevHeights[r.dataset.id] = r.getBoundingClientRect().height;
+    });
+  }
   $('#app').innerHTML = firebaseErrorBanner() + fn();
+  animateTaskRows(prevHeights);
+  if(State._focusEdit && State.taskEditing){
+    const el = document.getElementById('ti-title-'+State.taskEditing);
+    if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    State._focusEdit = false;
+  } else if(active && active.startsWith('ti-')){
+    const el = document.getElementById(active); if(el) el.focus();
+  }
 }
 
 
@@ -1309,7 +1401,7 @@ const actions = {
         <select id="qr-topic">${opts}</select>
       </label>`,
       `<button class="btn" onclick="App.actions.closeModal()">Cancelar</button>
-       <button class="btn primary" onclick="App.actions.startSession($('#qr-topic').value)">Continuar</button>`);
+       <button class="btn primary" onclick="App.actions.startSession(document.getElementById('qr-topic').value)">Continuar</button>`);
   },
 
   startSession(topicId){
@@ -1691,7 +1783,8 @@ const actions = {
   toggleGoalDone(id, val){ const g=State.goals.find(x=>x.id===id); g.completed=val; Store.save('goals',id,g); render(); },
   deleteGoal(id){ State.goals=State.goals.filter(g=>g.id!==id); Store.remove('goals',id); render(); },
 
-  openTaskForm(id, prefillDate, prefillCategory, prefillStatus, prefillParentId){
+  openTaskForm(id, prefillDate, prefillCategory, prefillStatus, prefillParentId, prefillHome){
+    State.taskMenu = null;
     const t = id? taskById(id) : null;
     const subjOpts = `<option value="">Nenhuma</option>` + State.subjects.map(s=>`<option value="${s.id}" ${t&&t.subjectId===s.id?'selected':''}>${esc(s.name)}</option>`).join('');
     const curCategory = t? t.category : (prefillCategory||'');
@@ -1699,6 +1792,7 @@ const actions = {
     const curParent = t? (t.parentTaskId||'') : (prefillParentId||'');
     const parentOpts = `<option value="">Nenhuma (tarefa principal)</option>` + mainTasks().filter(m=>m.id!==id).map(m=>`<option value="${m.id}" ${curParent===m.id?'selected':''}>${esc(m.title)}</option>`).join('');
     openModal(t? 'Editar tarefa' : 'Nova tarefa', `
+      <input type="hidden" id="tk-home" value="${(t? onHome(t)&&!!t.home : !!prefillHome && !prefillParentId)?'1':''}">
       <label class="field">Título<input type="text" id="tk-title" value="${esc(t?t.title:'')}" placeholder="Ex: Entender Estática"></label>
       <div class="field-row">
         <label class="field">Prioridade<select id="tk-priority">${PRIORITY_LIST.map(p=>`<option value="${p.key}" ${(t?t.priority:'media')===p.key?'selected':''}>${p.emoji} ${p.label}</option>`).join('')}</select></label>
@@ -1753,11 +1847,13 @@ const actions = {
       status: newStatus,
       parentTaskId: newParent,
       order,
+      home: !newParent && (($('#tk-home')||{}).value==='1'),
       createdAt: existing? existing.createdAt : todayISO(),
       completedAt: newStatus==='concluida' ? ((existing&&existing.completedAt)||todayISO()) : null,
     };
     if(id){ const i=State.tasks.findIndex(x=>x.id===id); if(i>=0) State.tasks[i]=task; }
     else State.tasks.push(task);
+    if(newParent) State.taskExpanded[newParent]=true;
     closeModal(); render();
     toastMsg(id? 'Tarefa atualizada!' : 'Tarefa criada!');
     await Store.save('tasks', task.id, task);
@@ -1774,60 +1870,145 @@ const actions = {
     const t = taskById(id); if(!t || !t.parentTaskId) return;
     t.parentTaskId = null;
     t.order = mainTasks().length;
+    State.taskMenu = null;
     render();
     toastMsg('Virou tarefa principal!');
     Store.save('tasks', id, t);
   },
+  indentTask(id, prevId){
+    const t = taskById(id); if(!t || t.parentTaskId) return;
+    if(subtasksOf(id).length){ toastMsg('Essa tarefa tem subtarefas — não dá pra virar subtarefa.'); return; }
+    let parent = prevId? taskById(prevId) : null;
+    if(!parent){ const roots = mainTasks(); const i = roots.findIndex(r=>r.id===id); parent = i>0? roots[i-1] : null; }
+    if(!parent || parent.parentTaskId){ toastMsg('Não tem uma tarefa principal acima pra virar a "mãe" dela.'); return; }
+    t.parentTaskId = parent.id; t.home = false;
+    t.order = subtasksOf(parent.id).filter(x=>x.id!==t.id).length;
+    State.taskExpanded[parent.id] = true; State.taskMenu = null;
+    render();
+    toastMsg(`Virou subtarefa de "${parent.title}"`);
+    saveTask(t);
+  },
   taskDragStart(ev, id){
+    ev.stopPropagation();
     ev.dataTransfer.setData('text/plain', id);
     ev.dataTransfer.effectAllowed = 'move';
     ev.currentTarget.classList.add('task-dragging');
   },
-  taskDragEnd(ev){ ev.currentTarget.classList.remove('task-dragging'); },
+  taskDragEnd(ev){ ev.stopPropagation(); ev.currentTarget.classList.remove('task-dragging'); },
   taskDragOver(ev, targetId){
+    ev.stopPropagation();
     ev.preventDefault();
     const row = ev.currentTarget;
     const rect = row.getBoundingClientRect();
     const y = ev.clientY - rect.top;
-    row.classList.remove('drop-before','drop-after','drop-nest');
-    let zone;
-    if(y < rect.height*0.28){ zone='before'; row.classList.add('drop-before'); }
-    else if(y > rect.height*0.72){ zone='after'; row.classList.add('drop-after'); }
-    else { zone='nest'; row.classList.add('drop-nest'); }
+    row.classList.remove('drop-before','drop-after');
+    const zone = y < rect.height/2 ? 'before' : 'after';
+    row.classList.add(zone==='before' ? 'drop-before' : 'drop-after');
     row.dataset.dropZone = zone;
   },
-  taskDragLeave(ev){ ev.currentTarget.classList.remove('drop-before','drop-after','drop-nest'); },
+  taskDragLeave(ev){ ev.stopPropagation(); ev.currentTarget.classList.remove('drop-before','drop-after'); },
   taskDrop(ev, targetId){
+    ev.stopPropagation();
     ev.preventDefault();
     const row = ev.currentTarget;
     const zone = row.dataset.dropZone || 'after';
-    row.classList.remove('drop-before','drop-after','drop-nest');
+    row.classList.remove('drop-before','drop-after');
     const draggedId = ev.dataTransfer.getData('text/plain');
     if(!draggedId || draggedId===targetId) return;
+    this.placeTask(draggedId, targetId, zone);
+  },
+  // Put a task right before/after another one (works from any list — the
+  // position is saved in the task's real sibling group, so a reorder done in
+  // "Hoje" is respected everywhere). Dropping next to a subtask makes it a
+  // subtask of the same parent; next to a main task makes it a main task.
+  placeTask(draggedId, targetId, zone){
     const dragged = taskById(draggedId), target = taskById(targetId);
-    if(!dragged || !target) return;
-
-    if(zone==='nest'){
-      if(target.parentTaskId){ toastMsg('Só dá pra colocar dentro de uma tarefa principal (não de uma subtarefa).'); return; }
-      if(subtasksOf(dragged.id).length){ toastMsg('Essa tarefa já tem subtarefas — não dá pra aninhar mais um nível.'); return; }
-      dragged.parentTaskId = target.id;
-      const sibs = subtasksOf(target.id).filter(s=>s.id!==dragged.id);
-      dragged.order = sibs.length;
-      render();
-      toastMsg(`Virou subtarefa de "${target.title}"`);
-      Store.save('tasks', dragged.id, dragged);
-      return;
-    }
-
+    if(!dragged || !target || draggedId===targetId) return;
     const newParent = target.parentTaskId || null;
+    if(newParent===dragged.id) return;
+    if(newParent && subtasksOf(dragged.id).length){ toastMsg('Uma tarefa que tem subtarefas não pode virar subtarefa.'); return; }
     dragged.parentTaskId = newParent;
-    let sibs = (newParent? subtasksOf(newParent) : mainTasks()).filter(s=>s.id!==dragged.id);
-    const targetIdx = sibs.findIndex(s=>s.id===target.id);
-    const insertAt = zone==='before'? targetIdx : targetIdx+1;
-    sibs.splice(insertAt, 0, dragged);
-    sibs.forEach((s,i)=>{ s.order=i; });
+    if(newParent) dragged.home = false;
+    const sibs = (newParent? subtasksOf(newParent) : mainTasks()).filter(x=>x.id!==dragged.id).sort((a,b)=>(a.order||0)-(b.order||0));
+    const idx = sibs.findIndex(x=>x.id===target.id);
+    sibs.splice(zone==='before'? idx : idx+1, 0, dragged);
+    sibs.forEach((x,i)=>{ x.order=i; });
+    if(newParent) State.taskExpanded[newParent]=true;
+    State.taskMenu = null;
     render();
-    sibs.forEach(s => Store.save('tasks', s.id, s));
+    sibs.forEach(saveTask);
+  },
+  newTaskFromTarefas(){ this.openTaskForm(null,null,null,null,null,State.tarefasTab==='hoje'); },
+  toggleTaskMenu(id){
+    const mt = taskById(id);
+    if(mt && mt.parentTaskId) State.openParent = mt.parentTaskId;
+    if(State.taskEditing) this.commitInlineEdit();
+    State.taskMenu = State.taskMenu===id ? null : id;
+    render();
+  },
+  startInlineEdit(id){
+    const prevEditing = State.taskEditing;
+    if(State.taskEditing && State.taskEditing!==id) this.commitInlineEdit();
+    const t = taskById(id); if(!t) return;
+    State.taskEditing = id; State.taskMenu = null; State._focusEdit = true;
+    State._editOrig = {title:t.title, description:t.description||''};
+    State._animRows.add(id);
+    const prevT = prevEditing && taskById(prevEditing);
+    if(t.parentTaskId) State._animRows.add(t.parentTaskId);
+    if(prevT && prevT.parentTaskId) State._animRows.add(prevT.parentTaskId);
+    render();
+  },
+  // Saves the inline edit WITHOUT re-rendering (so it can run mid-click).
+  commitInlineEdit(){
+    const id = State.taskEditing; if(!id) return;
+    State.taskEditing = null;
+    State._animRows.add(id);
+    const t = taskById(id); if(!t) return;
+    if(t.parentTaskId) State._animRows.add(t.parentTaskId);
+    const ti = document.getElementById('ti-title-'+id), td = document.getElementById('ti-desc-'+id);
+    const title = (ti? ti.value : t.title).trim();
+    const desc = (td? td.value : (t.description||'')).trim();
+    if(!title){
+      if(t._new){ State.tasks = State.tasks.filter(x=>x.id!==id); return; }
+      t.title = (State._editOrig && State._editOrig.title) || t.title;
+    } else t.title = title;
+    t.description = desc;
+    delete t._new;
+    saveTask(t);
+  },
+  finishInlineEdit(){
+    const t = taskById(State.taskEditing);
+    if(t && t.parentTaskId) State.openParent = t.parentTaskId;   // closing a subtask keeps its main task open
+    else State.openParent = null;
+    this.commitInlineEdit(); render();
+  },
+  openFullEdit(id){
+    if(State.taskEditing) this.commitInlineEdit();
+    State.taskMenu = null;
+    if(taskById(id)) this.openTaskForm(id); else render();
+  },
+  addSubtaskInline(parentId){
+    if(State.taskEditing) this.commitInlineEdit();
+    const parent = taskById(parentId); if(!parent || parent.parentTaskId) return;
+    const t = {id:uid(), title:'', description:'', dueDate:null, priority:'media', status:'pendente',
+      category: parent.category||null, subjectId:null, topicId:null, parentTaskId:parentId,
+      order: subtasksOf(parentId).length, home:false, createdAt:todayISO(), completedAt:null, _new:true};
+    State.tasks.push(t);
+    State.taskExpanded[parentId] = true;
+    State.taskMenu = null;
+    State.taskEditing = t.id; State._editOrig = {title:'', description:''}; State._focusEdit = true;
+    State._animRows.add(t.id); State._animRows.add(parentId);
+    render();
+  },
+  toggleStar(id){
+    const t = taskById(id); if(!t || t.parentTaskId) return;
+    if(onHome(t)){
+      t.home = false;
+      if(t.dueDate && t.dueDate<=todayISO()) t.dueDate = null;
+      toastMsg('Tirada das tarefas principais.');
+    } else { t.home = true; toastMsg('⭐ Agora é uma tarefa principal (aparece na Home).'); }
+    render();
+    saveTask(t);
   },
   icDragStart(ev, id){
     ev.dataTransfer.setData('text/plain', id);
@@ -1844,13 +2025,7 @@ const actions = {
     render();
     Store.save('tasks', id, t);
   },
-  toggleTaskHome(id){
-    const t = taskById(id); if(!t) return;
-    if(t.dueDate){ t.dueDate = null; toastMsg('Tarefa removida da Home.'); }
-    else { t.dueDate = todayISO(); toastMsg('Enviada pra Home!'); }
-    render();
-    Store.save('tasks', id, t);
-  },
+  toggleTaskHome(id){ this.toggleStar(id); },
   deleteTask(id){
     const orphaned = subtasksOf(id);
     if(orphaned.length){
@@ -1858,6 +2033,9 @@ const actions = {
       orphaned.forEach((s,i)=>{ s.parentTaskId = null; s.order = base+i; Store.save('tasks', s.id, s); });
     }
     State.tasks = State.tasks.filter(t=>t.id!==id);
+    if(State.taskMenu===id) State.taskMenu=null;
+    if(State.openParent===id) State.openParent=null;
+    if(State.taskEditing===id) State.taskEditing=null;
     Store.remove('tasks', id);
     closeModal(); render();
   },
@@ -1989,6 +2167,23 @@ function applyTheme(){
    ============================================================ */
 const App = {actions, render};
 window.App = App;
+
+// Google-Tasks-style: clicking anywhere outside the task being edited saves it,
+// and clicking outside an open ⋮ menu closes it.
+document.addEventListener('click', (e)=>{
+  let dirty = false;
+  if(State.taskEditing && !e.target.closest('.task-editing')){
+    const et = taskById(State.taskEditing);
+    const mainId = et ? (et.parentTaskId || et.id) : null;
+    const insideMain = mainId && e.target.closest(`.task-tree-row[data-id="${mainId}"]`);
+    actions.commitInlineEdit();
+    if(insideMain) State.openParent = mainId;
+    dirty = true;
+  }
+  if(State.openParent && !e.target.closest(`.task-tree-row[data-id="${State.openParent}"]`)){ State.openParent = null; dirty = true; }
+  if(State.taskMenu && !e.target.closest('.task-menu-wrap')){ State.taskMenu = null; dirty = true; }
+  if(dirty) setTimeout(()=>{ if(!State.taskEditing) render(); }, 0);
+}, true);
 
 (async function boot(){
   try{

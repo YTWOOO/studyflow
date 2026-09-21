@@ -277,3 +277,90 @@ label.field{display:flex; flex-direction:column; gap:5px; font-size:12.5px; font
 .ic-card.done .ic-card-title{text-decoration:line-through; opacity:.55;}
 
 
+
+/* ============ GOOGLE-TASKS-STYLE TASK ROW (inline edit, ⋮ menu, star) ============ */
+.task-tree-row{align-items:flex-start;}
+.task-tree-row > input[type=checkbox], .task-tree-row .drag-handle{margin-top:3px;}
+.task-tree-row.task-editing{border-color:var(--accent); cursor:default; box-shadow:var(--glow);}
+.task-desc-preview{font-size:12.5px; margin-top:3px; white-space:pre-wrap; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+.task-inline-title{width:100%; background:transparent; border:none; border-bottom:1px solid var(--line); font-weight:600; font-size:14px; padding:2px 0 4px; color:var(--ink); border-radius:0;}
+.task-inline-desc{width:100%; background:transparent; border:none; font-size:13px; color:var(--ink-soft); resize:vertical; min-height:38px; padding:6px 0 0; border-radius:0;}
+.task-inline-title:focus, .task-inline-desc:focus{outline:none; border-color:var(--accent);}
+.task-star{font-size:17px; color:var(--ink-faint); line-height:1; padding:2px 4px;}
+.task-star.on{color:#F5B83D;}
+.task-menu-wrap{position:relative; flex-shrink:0;}
+.task-menu-btn{font-size:18px; line-height:1; padding:2px 6px;}
+.task-menu{position:absolute; right:0; top:100%; margin-top:4px; z-index:60; min-width:230px; background:var(--paper-raised); border:1px solid var(--line); border-radius:var(--radius-s); box-shadow:var(--shadow-m); padding:4px;}
+.task-menu button{display:block; width:100%; text-align:left; background:none; border:none; padding:10px 12px; border-radius:6px; font-size:13.5px; cursor:pointer; color:var(--ink);}
+.task-menu button:hover{background:var(--paper-sunken);}
+.task-menu button.danger-item{color:var(--danger);}
+.task-tree .task-tree-node:last-child .task-menu{top:auto; bottom:100%; margin-bottom:4px;}
+.task-tree .task-tree-node:only-child .task-menu{top:100%; bottom:auto;}
+
+/* ============ HOME: bigger task blocks ============ */
+.home-tasks .task-tree-node{margin-bottom:10px;}
+.home-tasks .task-tree-row{padding:16px 16px; gap:12px; border-radius:var(--radius-m);}
+.home-tasks .task-tree-row .task-title{font-size:16px;}
+.home-tasks .task-tree-row .task-meta{font-size:13px; margin-top:4px;}
+.home-tasks .task-tree-row > input[type=checkbox]{width:21px; height:21px; margin-top:1px;}
+.home-tasks .task-inline-title{font-size:16px;}
+.home-tasks .task-toggle{height:52px;}
+.home-tasks .task-tree-children .task-tree-row{padding:12px 14px;}
+.home-tasks .task-tree-children .task-tree-row .task-title{font-size:14.5px;}
+
+/* Home: align task cards with the "Adicionar tarefa" button (no left gutter).
+   The expand arrow moves inside the card, where the drag handle was. */
+.home-tasks .task-row-group{position:relative;}
+.home-tasks .task-toggle-spacer, .home-tasks .drag-handle{display:none;}
+.home-tasks .task-tree-row{padding-left:30px;}
+.home-tasks .task-toggle{position:absolute; left:6px; top:14px; width:20px; height:26px; z-index:2;}
+.home-tasks .task-tree-children .task-toggle{top:10px;}
+
+/* ============ COMPLETE-TASK CHECKBOX: centered, bigger, Google-style circle ============ */
+.task-tree-row > input[type=checkbox]{
+  -webkit-appearance:none; appearance:none;
+  width:22px; height:22px; margin:0; flex-shrink:0; align-self:center;
+  border:2px solid var(--ink-faint); border-radius:50%;
+  background:transparent center/14px no-repeat;
+  cursor:pointer; transition:background-color .15s, border-color .15s, transform .1s;
+}
+.task-tree-row > input[type=checkbox]:hover{border-color:var(--accent);}
+.task-tree-row > input[type=checkbox]:active{transform:scale(.9);}
+.task-tree-row > input[type=checkbox]:checked{
+  background-color:var(--accent); border-color:var(--accent);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* keep star, ⋮ and drag handle on the same centre line as the checkbox */
+.task-tree-row > .drag-handle, .task-tree-row > .task-star, .task-tree-row > .task-menu-wrap{align-self:center; margin-top:0;}
+/* while a task is open for editing, pin controls to the top line (like Google Tasks) */
+.task-tree-row.task-editing > input[type=checkbox],
+.task-tree-row.task-editing > .task-star,
+.task-tree-row.task-editing > .task-menu-wrap{align-self:flex-start; margin-top:2px;}
+
+/* Home: bigger checkbox, and only reserve left room when the task has an expand arrow */
+.home-tasks .task-tree-row > input[type=checkbox]{width:26px; height:26px; background-size:16px; margin:0;}
+.home-tasks .task-tree-row{padding-left:16px;}
+.home-tasks .task-row-group:has(.task-toggle) > .task-tree-row{padding-left:30px;}
+.home-tasks .task-toggle{top:0; bottom:0; margin:auto 0; height:26px;}
+.home-tasks .task-row-group:has(.task-editing) .task-toggle{bottom:auto; top:16px;}
+.task-row-group{align-items:center;}
+.task-row-group:has(.task-editing){align-items:flex-start;}
+.task-row-group:has(.task-editing) > .task-toggle{margin-top:14px;}
+
+/* ============ SUBTASKS INSIDE THE OPEN CARD (Google Tasks style) ============ */
+.task-toggle, .task-toggle-spacer{display:none !important;}
+.home-tasks .task-tree-row, .home-tasks .task-row-group:has(.task-toggle) > .task-tree-row{padding-left:16px;}
+.task-desc-preview.full{-webkit-line-clamp:unset; display:block;}
+.task-subs-inline{margin-top:10px; padding-top:6px; border-top:1px solid var(--line-soft); display:flex; flex-direction:column; gap:2px; cursor:default;}
+.task-subs-inline .task-tree-node{margin:0;}
+.task-subs-inline .task-tree-row,
+.home-tasks .task-subs-inline .task-tree-row{background:transparent; border:none; box-shadow:none; padding:7px 0; gap:10px; border-radius:6px;}
+.task-subs-inline .task-tree-row.task-editing{background:var(--paper-sunken); padding:8px; box-shadow:none;}
+.task-subs-inline .drag-handle{display:none;}
+.task-subs-inline .task-tree-row > input[type=checkbox],
+.home-tasks .task-subs-inline .task-tree-row > input[type=checkbox]{width:20px; height:20px; background-size:12px;}
+.task-subs-inline .task-title, .home-tasks .task-subs-inline .task-tree-row .task-title{font-size:14px; font-weight:500;}
+.task-subs-inline .task-tree-row.drop-before{box-shadow:0 -2px 0 0 var(--accent) inset;}
+.task-subs-inline .task-tree-row.drop-after{box-shadow:0 2px 0 0 var(--accent) inset;}
+.task-add-sub{align-self:flex-start; background:none; border:none; color:var(--accent); font-size:13px; font-weight:600; padding:8px 0 2px; cursor:pointer;}
+.task-add-sub:hover{text-decoration:underline;}
