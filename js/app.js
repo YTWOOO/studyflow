@@ -1,4 +1,4 @@
-import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=31';
+import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFirebaseConfig, getStoredFirebaseConfig } from './store.js?v=32';
 
 'use strict';
 /* ============================================================
@@ -7,7 +7,7 @@ import { Store, getActiveFirebaseConfig, setStoredFirebaseConfig, clearStoredFir
    firebase-config.js) every time you ship an update, so the site
    itself tells you which version is actually loaded.
    ============================================================ */
-const APP_VERSION = 'v31';
+const APP_VERSION = 'v32';
 
 /* ============================================================
    CONSTANTS
@@ -649,13 +649,12 @@ function taskItem(t, prevId, nextId){
     t.priority && t.priority!=='media'? `${pr.emoji} ${pr.label}` : '',
     cat? `${cat.emoji} ${cat.label}` : '',
     subj? esc(subj.name) : '',
-    hasSubs? `📋 ${doneSubs}/${subs.length}` : '',
     (!editing && t.description)? `📝` : '',
   ].filter(Boolean).join(' · ');
 
-  const subsBlock = !open? '' : `<div class="task-subs-inline" onclick="event.stopPropagation()">
+  const subsBlock = (isSub || (!hasSubs && !open))? '' : `<div class="task-subs-inline ${open?'open':''}" onclick="event.stopPropagation()">
       ${subs.map((x,i)=>taskItem(x, subs[i-1]&&subs[i-1].id, subs[i+1]&&subs[i+1].id)).join('')}
-      <button class="task-add-sub" onclick="App.actions.addSubtaskInline('${t.id}')">➕ Adicionar subtarefa</button>
+      ${open? `<button class="task-add-sub" onclick="App.actions.addSubtaskInline('${t.id}')">➕ Adicionar subtarefa</button>`:''}
     </div>`;
   const body = editing
     ? `<input class="task-inline-title" id="ti-title-${t.id}" value="${esc(t.title)}" placeholder="Título"
@@ -1868,6 +1867,8 @@ const actions = {
   toggleTaskExpand(id){ State.taskExpanded[id] = !State.taskExpanded[id]; render(); },
   promoteSubtask(id){
     const t = taskById(id); if(!t || !t.parentTaskId) return;
+    const oldParent = taskById(t.parentTaskId);
+    if(oldParent && onHome(oldParent)) t.home = true;
     t.parentTaskId = null;
     t.order = mainTasks().length;
     State.taskMenu = null;
@@ -1927,6 +1928,8 @@ const actions = {
     const newParent = target.parentTaskId || null;
     if(newParent===dragged.id) return;
     if(newParent && subtasksOf(dragged.id).length){ toastMsg('Uma tarefa que tem subtarefas não pode virar subtarefa.'); return; }
+    const oldParent = dragged.parentTaskId ? taskById(dragged.parentTaskId) : null;
+    if(!newParent && oldParent && onHome(oldParent)) dragged.home = true;   // leaving a starred task keeps it visible where it was
     dragged.parentTaskId = newParent;
     if(newParent) dragged.home = false;
     const sibs = (newParent? subtasksOf(newParent) : mainTasks()).filter(x=>x.id!==dragged.id).sort((a,b)=>(a.order||0)-(b.order||0));

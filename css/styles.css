@@ -364,3 +364,14 @@ label.field{display:flex; flex-direction:column; gap:5px; font-size:12.5px; font
 .task-subs-inline .task-tree-row.drop-after{box-shadow:0 2px 0 0 var(--accent) inset;}
 .task-add-sub{align-self:flex-start; background:none; border:none; color:var(--accent); font-size:13px; font-weight:600; padding:8px 0 2px; cursor:pointer;}
 .task-add-sub:hover{text-decoration:underline;}
+
+/* subtasks always visible: compact title-only lines under the main task */
+.task-subs-inline{margin-top:8px; padding-top:4px;}
+.task-subs-inline:not(.open){border-top:none;}
+.task-subs-inline .task-tree-row, .home-tasks .task-subs-inline .task-tree-row{padding:5px 0;}
+.task-subs-inline .task-meta{font-size:12px; margin-top:1px;}
+/* a main task that shows subtasks keeps its own controls on the title line */
+.task-tree-row:has(> .task-body > .task-subs-inline) > input[type=checkbox],
+.task-tree-row:has(> .task-body > .task-subs-inline) > .task-star,
+.task-tree-row:has(> .task-body > .task-subs-inline) > .task-menu-wrap,
+.task-tree-row:has(> .task-body > .task-subs-inline) > .drag-handle{align-self:flex-start; margin-top:0;}
